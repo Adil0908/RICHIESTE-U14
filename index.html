@@ -3,172 +3,209 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Gestione Ferie & Permessi</title>
-    <link rel="stylesheet" href="style.css">
-    <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+    <title>Login - Gestione Richieste</title>
+    <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
-    <div id="app">
-        <!-- Header -->
-        <header class="app-header">
-            <h1>Gestione Ferie & Permessi</h1>
-            <div id="user-info" class="user-info">
-                <span id="user-name"></span>
-                <button id="logout-btn" class="btn btn-logout">
-                    <i class="material-icons">logout</i>
-                </button>
+    <div class="login-container">
+        <h1>Accesso al Sistema</h1>
+        <form id="loginForm">
+            <div class="form-group">
+                <label for="email">Email</label>
+                <input type="email" id="email" required>
             </div>
-        </header>
-
-        <!-- Main Content -->
-        <main class="app-main">
-            <!-- Login Section -->
-            <section id="login-section" class="section">
-                <div class="login-container">
-                    <h2>Accedi</h2>
-                    <form id="login-form">
-                        <div class="form-group">
-                            <label for="email">Email</label>
-                            <input type="email" id="email" required>
-                        </div>
-                        <div class="form-group">
-                            <label for="password">Password</label>
-                            <input type="password" id="password" required>
-                        </div>
-                        <button type="submit" class="btn btn-primary">Accedi</button>
-                    </form>
-                </div>
-            </section>
-
-            <!-- Dashboard Section -->
-            <section id="dashboard-section" class="section hidden">
-                <div class="tabs">
-                    <button id="tab-requests" class="tab-btn active">Le mie richieste</button>
-                    <button id="tab-new-request" class="tab-btn">Nuova richiesta</button>
-                    <button id="tab-calendar" class="tab-btn">Calendario</button>
-                    <button id="tab-reports" class="tab-btn hidden" data-role="admin">Report</button>
-                    <button id="tab-admin" class="tab-btn hidden" data-role="admin">Amministrazione</button>
-                </div>
-
-                <!-- My Requests Tab -->
-                <div id="requests-tab" class="tab-content active">
-                    <h2>Le mie richieste</h2>
-                    <div class="requests-list" id="requests-list"></div>
-                </div>
-
-                <!-- New Request Tab -->
-                <div id="new-request-tab" class="tab-content">
-                    <h2>Nuova richiesta</h2>
-                    <form id="new-request-form">
-                        <div class="form-group">
-                            <label for="request-type">Tipo di richiesta</label>
-                            <select id="request-type" required>
-                                <option value="ferie">Ferie</option>
-                                <option value="permesso">Permesso</option>
-                                <option value="malattia">Malattia</option>
-                            </select>
-                        </div>
-
-                        <div class="form-group">
-                            <label for="start-date">Data inizio</label>
-                            <input type="date" id="start-date" required>
-                        </div>
-
-                        <div class="form-group" id="end-date-group">
-                            <label for="end-date">Data fine</label>
-                            <input type="date" id="end-date">
-                        </div>
-
-                        <div class="form-group hidden" id="hours-group">
-                            <label for="hours">Ore</label>
-                            <input type="number" id="hours" min="1" max="8" value="1">
-                        </div>
-
-                        <div class="form-group">
-                            <label for="notes">Note</label>
-                            <textarea id="notes" rows="3"></textarea>
-                        </div>
-
-                        <button type="submit" class="btn btn-primary">Invia richiesta</button>
-                    </form>
-                </div>
-
-                <!-- Calendar Tab -->
-                <div id="calendar-tab" class="tab-content">
-                    <h2>Calendario</h2>
-                    <div class="calendar-container">
-                        <div class="calendar-header">
-                            <button id="prev-month" class="btn btn-icon">
-                                <i class="material-icons">chevron_left</i>
-                            </button>
-                            <h3 id="current-month">Mese Anno</h3>
-                            <button id="next-month" class="btn btn-icon">
-                                <i class="material-icons">chevron_right</i>
-                            </button>
-                        </div>
-                        <div class="calendar-grid" id="calendar-grid"></div>
-                    </div>
-                </div>
-
-                <!-- Reports Tab -->
-                <div id="reports-tab" class="tab-content">
-                    <h2>Genera report</h2>
-                    <div class="report-form">
-                        <div class="form-group">
-                            <label for="report-month">Mese</label>
-                            <select id="report-month">
-                                <option value="1">Gennaio</option>
-                                <option value="2">Febbraio</option>
-                                <!-- ... altri mesi ... -->
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label for="report-year">Anno</label>
-                            <input type="number" id="report-year" min="2020" max="2030" value="2023">
-                        </div>
-                        <button id="generate-report" class="btn btn-primary">Genera PDF</button>
-                    </div>
-                </div>
-
-                <!-- Admin Tab -->
-                <div id="admin-tab" class="tab-content">
-                    <h2>Amministrazione</h2>
-                    <div class="admin-controls">
-                        <div class="pending-requests">
-                            <h3>Richieste in attesa</h3>
-                            <div id="pending-requests-list" class="requests-list"></div>
-                        </div>
-                        <div class="employees-list">
-                            <h3>Dipendenti</h3>
-                            <div id="employees-list"></div>
-                        </div>
-                    </div>
-                </div>
-            </section>
-        </main>
-
-        <!-- Footer -->
-        <footer class="app-footer">
-            <p>Gestione Ferie & Permessi &copy; 2023</p>
-        </footer>
+            <div class="form-group">
+                <label for="password">Password</label>
+                <input type="password" id="password" required>
+            </div>
+            <button type="submit">Accedi</button>
+        </form>
+        <div id="loginError" class="error-message"></div>
     </div>
-
-    <!-- Firebase SDK -->
-    <script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-auth-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-firestore-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-storage-compat.js"></script>
+    <script src="js/firebase-config.js"></script>
+    <script src="js/auth.js"></script>
+</body>
+</html>
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin - Gestione Richieste</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+</head>
+<body>
+    <header>
+        <h1>Pannello Amministratore</h1>
+        <button id="logoutBtn">Logout</button>
+    </header>
     
-    <!-- jsPDF -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.25/jspdf.plugin.autotable.min.js"></script>
+    <div class="admin-container">
+        <div class="tabs">
+            <button class="tab-btn active" data-tab="requests">Richieste</button>
+            <button class="tab-btn" data-tab="employees">Dipendenti</button>
+        </div>
+        
+        <div id="requests" class="tab-content active">
+            <div class="filters">
+                <select id="filterType">
+                    <option value="">Tutti i tipi</option>
+                    <option value="permesso">Permesso</option>
+                    <option value="ferie">Ferie</option>
+                    <option value="malattia">Malattia</option>
+                </select>
+                <input type="text" id="filterName" placeholder="Filtra per nome">
+                <input type="number" id="filterYear" placeholder="Anno">
+                <button id="applyFilters">Applica Filtri</button>
+                <button id="exportPdf">Esporta PDF</button>
+            </div>
+            
+            <table id="requestsTable">
+                <thead>
+                    <tr>
+                        <th>Nome</th>
+                        <th>Cognome</th>
+                        <th>Tipo</th>
+                        <th>Data/Ore</th>
+                        <th>Stato</th>
+                        <th>Azioni</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+        
+        <div id="employees" class="tab-content">
+            <button id="addEmployeeBtn">Aggiungi Dipendente</button>
+            <table id="employeesTable">
+                <thead>
+                    <tr>
+                        <th>Nome</th>
+                        <th>Cognome</th>
+                        <th>Email</th>
+                        <th>Ruolo</th>
+                        <th>Azioni</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </div>
     
-    <!-- App Scripts -->
-    <script src="firebase-config.js"></script>
-    <script src="src/js/auth.js"></script>
-    <script src="src/js/db.js"></script>
-    <script src="src/js/reports.js"></script>
-    <script src="src/js/ui.js"></script>
-    <script src="src/js/main.js"></script>
+    <!-- Modali -->
+    <div id="employeeModal" class="modal">
+        <!-- Contenuto modale dipendente -->
+    </div>
+    
+    <div id="requestModal" class="modal">
+        <!-- Contenuto modale richiesta -->
+    </div>
+    
+    <script src="js/firebase-config.js"></script>
+    <script src="js/admin.js"></script>
+    <script src="js/utils.js"></script>
+</body>
+</html>
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dipendente - Gestione Richieste</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <header>
+        <h1>Benvenuto <span id="userName"></span></h1>
+        <button id="logoutBtn">Logout</button>
+    </header>
+    
+    <div class="employee-container">
+        <div class="request-type">
+            <button class="type-btn active" data-type="permesso">Richiedi Permesso</button>
+            <button class="type-btn" data-type="ferie">Richiedi Ferie</button>
+            <button class="type-btn" data-type="malattia">Segnala Malattia</button>
+        </div>
+        
+        <div id="permesso" class="request-form active">
+            <h2>Richiesta Permesso</h2>
+            <form id="permissionForm">
+                <div class="form-group">
+                    <label for="permissionDate">Data</label>
+                    <input type="date" id="permissionDate" required>
+                </div>
+                <div class="form-group">
+                    <label for="permissionHours">Ore di assenza</label>
+                    <input type="number" id="permissionHours" min="1" max="8" required>
+                </div>
+                <div class="form-group">
+                    <label for="permissionReason">Motivo</label>
+                    <textarea id="permissionReason" rows="3"></textarea>
+                </div>
+                <button type="submit">Invia Richiesta</button>
+            </form>
+        </div>
+        
+        <div id="ferie" class="request-form">
+            <h2>Richiesta Ferie</h2>
+            <form id="holidayForm">
+                <div class="form-group">
+                    <label for="holidayStart">Data inizio</label>
+                    <input type="date" id="holidayStart" required>
+                </div>
+                <div class="form-group">
+                    <label for="holidayEnd">Data fine</label>
+                    <input type="date" id="holidayEnd" required>
+                </div>
+                <div class="form-group">
+                    <label for="holidayReason">Motivo</label>
+                    <textarea id="holidayReason" rows="3"></textarea>
+                </div>
+                <button type="submit">Invia Richiesta</button>
+            </form>
+        </div>
+        
+        <div id="malattia" class="request-form">
+            <h2>Segnalazione Malattia</h2>
+            <form id="sicknessForm">
+                <div class="form-group">
+                    <label for="sicknessStart">Data inizio</label>
+                    <input type="date" id="sicknessStart" required>
+                </div>
+                <div class="form-group">
+                    <label for="sicknessEnd">Data fine</label>
+                    <input type="date" id="sicknessEnd" required>
+                </div>
+                <div class="form-group">
+                    <label for="medicalCert">Numero certificato medico</label>
+                    <input type="text" id="medicalCert" required>
+                </div>
+                <div class="form-group">
+                    <label for="certDate">Data certificato</label>
+                    <input type="date" id="certDate" required>
+                </div>
+                <button type="submit">Invia Segnalazione</button>
+            </form>
+        </div>
+        
+        <div class="my-requests">
+            <h2>Le mie richieste</h2>
+            <table id="myRequestsTable">
+                <thead>
+                    <tr>
+                        <th>Tipo</th>
+                        <th>Data/Ore</th>
+                        <th>Stato</th>
+                        <th>Data richiesta</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </div>
+    
+    <script src="js/firebase-config.js"></script>
+    <script src="js/employee.js"></script>
 </body>
 </html>

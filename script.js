@@ -16,478 +16,270 @@ const firebaseConfig = {
 // Inizializza Firebase
 firebase.initializeApp(firebaseConfig);
 
-// Riferimenti ai servizi Firebase
-const auth = firebase.auth();
 const db = firebase.firestore();
-const storage = firebase.storage();
-// Gestione autenticazione
-let currentUser = null;
-
-// Ascolta cambiamenti nello stato di autenticazione
-auth.onAuthStateChanged(user => {
-    currentUser = user;
-    if (user) {
-        // Utente loggato
-        document.getElementById('login-section').classList.add('hidden');
-        document.getElementById('dashboard-section').classList.remove('hidden');
-        document.getElementById('user-name').textContent = user.email;
-        
-        // Verifica se l'utente è admin
-        checkUserRole(user.uid);
-        
-        // Carica i dati dell'utente
-        loadUserData();
-    } else {
-        // Utente non loggato
-        document.getElementById('login-section').classList.remove('hidden');
-        document.getElementById('dashboard-section').classList.add('hidden');
-    }
-});
-
-// Login form
-document.getElementById('login-form').addEventListener('submit', async (e) => {
+const auth = firebase.auth();       
+document.getElementById('loginForm').addEventListener('submit', (e) => {
     e.preventDefault();
     
     const email = document.getElementById('email').value;
     const password = document.getElementById('password').value;
     
-    try {
-        await auth.signInWithEmailAndPassword(email, password);
-    } catch (error) {
-        alert('Errore di accesso: ' + error.message);
+    auth.signInWithEmailAndPassword(email, password)
+        .then((userCredential) => {
+            // Verifica se l'utente è admin o dipendente
+            return db.collection('employees').doc(userCredential.user.uid).get();
+        })
+        .then((doc) => {
+            if (doc.exists) {
+                const userData = doc.data();
+                if (userData.isAdmin) {
+                    window.location.href = 'admin.html';
+                } else {
+                    window.location.href = 'employee.html';
+                }
+            } else {
+                throw new Error('Utente non registrato');
+            }
+        })
+        .catch((error) => {
+            document.getElementById('loginError').textContent = error.message;
+        });
+});
+// Gestione tab
+document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+        
+        btn.classList.add('active');
+        document.getElementById(btn.dataset.tab).classList.add('active');
+    });
+});
+
+// Carica richieste
+function loadRequests(filters = {}) {
+    let query = db.collection('requests');
+    
+    if (filters.type) query = query.where('type', '==', filters.type);
+    if (filters.year) query = query.where('year', '==', parseInt(filters.year));
+    
+    query.get().then((querySnapshot) => {
+        const tbody = document.querySelector('#requestsTable tbody');
+        tbody.innerHTML = '';
+        
+        querySnapshot.forEach((doc) => {
+            const request = doc.data();
+            const row = document.createElement('tr');
+            
+            // Filtro per nome (lato client per semplicità)
+            if (filters.name && !`${request.firstName} ${request.lastName}`.toLowerCase().includes(filters.name.toLowerCase())) {
+                return;
+            }
+            
+            row.innerHTML = `
+                <td>${request.firstName}</td>
+                <td>${request.lastName}</td>
+                <td>${request.type}</td>
+                <td>${formatRequestDate(request)}</td>
+                <td><span class="status-badge ${request.status}">${request.status}</span></td>
+                <td>
+                    <button class="action-btn view" data-id="${doc.id}"><i class="fas fa-eye"></i></button>
+                    <button class="action-btn edit" data-id="${doc.id}"><i class="fas fa-edit"></i></button>
+                    <button class="action-btn delete" data-id="${doc.id}"><i class="fas fa-trash"></i></button>
+                </td>
+            `;
+            
+            tbody.appendChild(row);
+        });
+        
+        // Aggiungi event listeners ai pulsanti
+        addRequestActionListeners();
+    });
+}
+
+// Formatta la data in base al tipo di richiesta
+function formatRequestDate(request) {
+    switch(request.type) {
+        case 'permesso':
+            return `${request.date} (${request.hours} ore)`;
+        case 'ferie':
+            return `Dal ${request.startDate} al ${request.endDate}`;
+        case 'malattia':
+            return `Dal ${request.startDate} al ${request.endDate}`;
+        default:
+            return '';
     }
+}
+
+// Filtri
+document.getElementById('applyFilters').addEventListener('click', () => {
+    const filters = {
+        type: document.getElementById('filterType').value,
+        name: document.getElementById('filterName').value,
+        year: document.getElementById('filterYear').value
+    };
+    
+    loadRequests(filters);
+});
+
+// Esporta PDF (utilizzando jsPDF)
+document.getElementById('exportPdf').addEventListener('click', () => {
+    // Implementa l'esportazione PDF qui
+    // Puoi usare la libreria jsPDF
 });
 
 // Logout
-document.getElementById('logout-btn').addEventListener('click', () => {
-    auth.signOut();
+document.getElementById('logoutBtn').addEventListener('click', () => {
+    auth.signOut().then(() => {
+        window.location.href = 'index.html';
+    });
 });
 
-// Verifica ruolo utente
-async function checkUserRole(uid) {
-    const userDoc = await db.collection('dipendenti').doc(uid).get();
-    if (userDoc.exists && userDoc.data().ruolo === 'admin') {
-        // Mostra tab admin e reports
-        document.querySelectorAll('[data-role="admin"]').forEach(el => {
-            el.classList.remove('hidden');
-        });
-    }
-}
-// Operazioni sul database
-async function loadUserData() {
-    if (!currentUser) return;
-    
-    // Carica le richieste dell'utente
-    const requestsQuery = db.collection('richieste')
-        .where('dipendenteId', '==', currentUser.uid)
-        .orderBy('dataInizio', 'desc');
-    
-    const requestsSnapshot = await requestsQuery.get();
-    
-    const requestsList = document.getElementById('requests-list');
-    requestsList.innerHTML = '';
-    
-    requestsSnapshot.forEach(doc => {
-        const request = doc.data();
-        requestsList.appendChild(createRequestCard(request));
-    });
-    
-    // Se admin, carica le richieste in attesa
-    if (document.querySelector('[data-role="admin"]:not(.hidden)')) {
-        loadPendingRequests();
-        loadEmployees();
-    }
-}
-
-function createRequestCard(request) {
-    const card = document.createElement('div');
-    card.className = 'request-card';
-    
-    const typeMap = {
-        'ferie': 'Ferie',
-        'permesso': 'Permesso',
-        'malattia': 'Malattia'
-    };
-    
-    const statusMap = {
-        'in attesa': 'status-pending',
-        'approvato': 'status-approved',
-        'rifiutato': 'status-rejected'
-    };
-    
-    const startDate = request.dataInizio.toDate().toLocaleDateString();
-    const endDate = request.dataFine ? request.dataFine.toDate().toLocaleDateString() : startDate;
-    
-    card.innerHTML = `
-        <div class="request-info">
-            <div class="request-type">${typeMap[request.tipo]}</div>
-            <div class="request-dates">${startDate} - ${endDate}</div>
-            ${request.ore ? `<div class="request-hours">${request.ore} ore</div>` : ''}
-            ${request.note ? `<div class="request-notes">${request.note}</div>` : ''}
-        </div>
-        <div class="request-status ${statusMap[request.stato]}">${request.stato}</div>
-    `;
-    
-    return card;
-}
-
-async function loadPendingRequests() {
-    const pendingQuery = db.collection('richieste')
-        .where('stato', '==', 'in attesa')
-        .orderBy('dataRichiesta', 'desc');
-    
-    const pendingSnapshot = await pendingQuery.get();
-    
-    const pendingList = document.getElementById('pending-requests-list');
-    pendingList.innerHTML = '';
-    
-    // Precarica i dati dei dipendenti
-    const employeesSnapshot = await db.collection('dipendenti').get();
-    const employees = {};
-    employeesSnapshot.forEach(doc => {
-        employees[doc.id] = doc.data();
-    });
-    
-    pendingSnapshot.forEach(doc => {
-        const request = doc.data();
-        const employee = employees[request.dipendenteId] || { nome: 'N/A', cognome: '' };
-        
-        const card = document.createElement('div');
-        card.className = 'request-card';
-        card.innerHTML = `
-            <div class="request-info">
-                <div class="request-type">${employee.nome} ${employee.cognome}</div>
-                <div class="request-dates">${request.dataInizio.toDate().toLocaleDateString()}</div>
-                <div>${request.tipo}</div>
-            </div>
-            <div class="request-actions">
-                <button class="btn btn-secondary approve-btn" data-id="${doc.id}">Approva</button>
-                <button class="btn btn-danger reject-btn" data-id="${doc.id}">Rifiuta</button>
-            </div>
-        `;
-        
-        pendingList.appendChild(card);
-    });
-    
-    // Aggiungi event listeners ai pulsanti
-    document.querySelectorAll('.approve-btn').forEach(btn => {
-        btn.addEventListener('click', () => updateRequestStatus(btn.dataset.id, 'approvato'));
-    });
-    
-    document.querySelectorAll('.reject-btn').forEach(btn => {
-        btn.addEventListener('click', () => updateRequestStatus(btn.dataset.id, 'rifiutato'));
-    });
-}
-
-async function updateRequestStatus(requestId, status) {
-    try {
-        await db.collection('richieste').doc(requestId).update({ stato: status });
-        loadPendingRequests();
-        loadUserData(); // Aggiorna anche la vista dell'utente
-    } catch (error) {
-        alert('Errore durante l\'aggiornamento: ' + error.message);
-    }
-}
-
-async function loadEmployees() {
-    const employeesSnapshot = await db.collection('dipendenti').get();
-    
-    const employeesList = document.getElementById('employees-list');
-    employeesList.innerHTML = '';
-    
-    employeesSnapshot.forEach(doc => {
-        const employee = doc.data();
-        const card = document.createElement('div');
-        card.className = 'employee-card';
-        card.innerHTML = `
-            <div class="employee-name">${employee.nome} ${employee.cognome}</div>
-            <div class="employee-details">
-                <div>Email: ${employee.email}</div>
-                <div>Ruolo: ${employee.ruolo}</div>
-                <div>Ferie residue: ${employee.giorniFerieResidui}</div>
-            </div>
-        `;
-        employeesList.appendChild(card);
-    });
-}
-
-// Invia nuova richiesta
-document.getElementById('new-request-form').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    
-    if (!currentUser) return;
-    
-    const type = document.getElementById('request-type').value;
-    const startDate = new Date(document.getElementById('start-date').value);
-    const endDate = type !== 'permesso' ? new Date(document.getElementById('end-date').value) : startDate;
-    const hours = type === 'permesso' ? parseInt(document.getElementById('hours').value) : 0;
-    const notes = document.getElementById('notes').value;
-    
-    try {
-        await db.collection('richieste').add({
-            dipendenteId: currentUser.uid,
-            tipo: type,
-            dataInizio: firebase.firestore.Timestamp.fromDate(startDate),
-            dataFine: firebase.firestore.Timestamp.fromDate(endDate),
-            ore: hours,
-            stato: 'in attesa',
-            dataRichiesta: firebase.firestore.FieldValue.serverTimestamp(),
-            note: notes
-        });
-        
-        alert('Richiesta inviata con successo!');
-        document.getElementById('new-request-form').reset();
-        loadUserData();
-    } catch (error) {
-        alert('Errore durante l\'invio della richiesta: ' + error.message);
-    }
-});
-
-// Gestione cambio tipo richiesta
-document.getElementById('request-type').addEventListener('change', (e) => {
-    const type = e.target.value;
-    const endDateGroup = document.getElementById('end-date-group');
-    const hoursGroup = document.getElementById('hours-group');
-    
-    if (type === 'permesso') {
-        endDateGroup.classList.add('hidden');
-        hoursGroup.classList.remove('hidden');
+// Carica le richieste all'avvio
+auth.onAuthStateChanged(user => {
+    if (user) {
+        db.collection('employees').doc(user.uid).get()
+            .then(doc => {
+                if (doc.exists && doc.data().isAdmin) {
+                    loadRequests();
+                    loadEmployees();
+                } else {
+                    window.location.href = 'index.html';
+                }
+            });
     } else {
-        endDateGroup.classList.remove('hidden');
-        hoursGroup.classList.add('hidden');
+        window.location.href = 'index.html';
     }
 });
-// Generazione report PDF
-document.getElementById('generate-report').addEventListener('click', async () => {
-    const month = parseInt(document.getElementById('report-month').value);
-    const year = parseInt(document.getElementById('report-year').value);
-    
-    // Crea un nuovo documento PDF
-    const { jsPDF } = window.jspdf;
-    const doc = new jsPDF();
-    
-    // Aggiungi titolo
-    doc.setFontSize(18);
-    doc.setTextColor(40);
-    doc.text(`Report ferie/permessi - ${month}/${year}`, 105, 20, { align: 'center' });
-    
-    // Recupera i dati da Firebase
-    const startDate = new Date(year, month - 1, 1);
-    const endDate = new Date(year, month, 0, 23, 59, 59);
-    
-    const requestsQuery = db.collection('richieste')
-        .where('dataInizio', '>=', startDate)
-        .where('dataInizio', '<=', endDate);
-    
-    const requestsSnapshot = await requestsQuery.get();
-    
-    // Recupera i dipendenti
-    const employeesSnapshot = await db.collection('dipendenti').get();
-    const employees = {};
-    employeesSnapshot.forEach(doc => {
-        employees[doc.id] = doc.data();
-    });
-    
-    // Prepara i dati per la tabella
-    const tableData = [];
-    
-    requestsSnapshot.forEach(doc => {
-        const request = doc.data();
-        const employee = employees[request.dipendenteId] || { nome: 'N/A', cognome: '' };
-        
-        tableData.push([
-            `${employee.nome} ${employee.cognome}`,
-            request.tipo,
-            request.dataInizio.toDate().toLocaleDateString(),
-            request.dataFine ? request.dataFine.toDate().toLocaleDateString() : '-',
-            request.ore || '-',
-            request.stato
-        ]);
-    });
-    
-    // Aggiungi la tabella al PDF
-    doc.autoTable({
-        head: [['Dipendente', 'Tipo', 'Data Inizio', 'Data Fine', 'Ore', 'Stato']],
-        body: tableData,
-        startY: 30,
-        styles: { fontSize: 9 },
-        headStyles: { fillColor: [66, 133, 244] },
-        columnStyles: {
-            0: { cellWidth: 40 },
-            1: { cellWidth: 25 },
-            2: { cellWidth: 25 },
-            3: { cellWidth: 25 },
-            4: { cellWidth: 15 },
-            5: { cellWidth: 20 }
-        }
-    });
-    
-    // Salva il PDF
-    doc.save(`report_ferie_${month}_${year}.pdf`);
-    
-    // Opzionale: salva su Firebase Storage
-    const blob = doc.output('blob');
-    const storageRef = storage.ref(`reports/report_${year}_${month}.pdf`);
-    await storageRef.put(blob);
-});
-// Gestione UI e tabs
-document.querySelectorAll('.tab-btn').forEach(btn => {
+// Gestione tipo di richiesta
+document.querySelectorAll('.type-btn').forEach(btn => {
     btn.addEventListener('click', () => {
-        // Rimuovi active da tutti i tab buttons
-        document.querySelectorAll('.tab-btn').forEach(tb => {
-            tb.classList.remove('active');
-        });
+        document.querySelectorAll('.type-btn').forEach(b => b.classList.remove('active'));
+        document.querySelectorAll('.request-form').forEach(f => f.classList.remove('active'));
         
-        // Aggiungi active al tab button cliccato
         btn.classList.add('active');
-        
-        // Nascondi tutti i tab content
-        document.querySelectorAll('.tab-content').forEach(tc => {
-            tc.classList.remove('active');
-        });
-        
-        // Mostra il tab content corrispondente
-        const tabId = btn.id.replace('tab-', '') + '-tab';
-        document.getElementById(tabId).classList.add('active');
-        
-        // Se è il tab del calendario, aggiorna il calendario
-        if (btn.id === 'tab-calendar') {
-            updateCalendar();
-        }
+        document.getElementById(btn.dataset.type).classList.add('active');
     });
 });
 
-// Gestione calendario
-let currentCalendarDate = new Date();
-
-function updateCalendar() {
-    const year = currentCalendarDate.getFullYear();
-    const month = currentCalendarDate.getMonth();
-    
-    // Aggiorna il titolo del mese
-    const monthNames = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno',
-                      'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'];
-    document.getElementById('current-month').textContent = `${monthNames[month]} ${year}`;
-    
-    // Calcola il primo giorno del mese e l'ultimo giorno
-    const firstDay = new Date(year, month, 1);
-    const lastDay = new Date(year, month + 1, 0);
-    
-    // Calcola i giorni del mese precedente e successivo da mostrare
-    const daysInMonth = lastDay.getDate();
-    const firstDayOfWeek = firstDay.getDay() === 0 ? 6 : firstDay.getDay() - 1; // Lun=0, Dom=6
-    
-    // Pulisci il calendario
-    const calendarGrid = document.getElementById('calendar-grid');
-    calendarGrid.innerHTML = '';
-    
-    // Aggiungi i giorni della settimana
-    const dayNames = ['Lun', 'Mar', 'Mer', 'Gio', 'Ven', 'Sab', 'Dom'];
-    dayNames.forEach(day => {
-        const dayHeader = document.createElement('div');
-        dayHeader.className = 'calendar-day-header';
-        dayHeader.textContent = day;
-        calendarGrid.appendChild(dayHeader);
+// Invia richiesta permesso
+document.getElementById('permissionForm').addEventListener('submit', (e) => {
+    e.preventDefault();
+    submitRequest('permesso', {
+        date: document.getElementById('permissionDate').value,
+        hours: document.getElementById('permissionHours').value,
+        reason: document.getElementById('permissionReason').value
     });
+});
+
+// Invia richiesta ferie
+document.getElementById('holidayForm').addEventListener('submit', (e) => {
+    e.preventDefault();
+    submitRequest('ferie', {
+        startDate: document.getElementById('holidayStart').value,
+        endDate: document.getElementById('holidayEnd').value,
+        reason: document.getElementById('holidayReason').value
+    });
+});
+
+// Invia segnalazione malattia
+document.getElementById('sicknessForm').addEventListener('submit', (e) => {
+    e.preventDefault();
+    submitRequest('malattia', {
+        startDate: document.getElementById('sicknessStart').value,
+        endDate: document.getElementById('sicknessEnd').value,
+        medicalCert: document.getElementById('medicalCert').value,
+        certDate: document.getElementById('certDate').value
+    });
+});
+
+// Funzione generica per inviare richieste
+function submitRequest(type, data) {
+    const user = auth.currentUser;
     
-    // Aggiungi i giorni vuoti all'inizio se necessario
-    for (let i = 0; i < firstDayOfWeek; i++) {
-        const emptyDay = document.createElement('div');
-        emptyDay.className = 'calendar-day empty';
-        calendarGrid.appendChild(emptyDay);
+    if (user) {
+        db.collection('employees').doc(user.uid).get()
+            .then(doc => {
+                if (doc.exists) {
+                    const employee = doc.data();
+                    const requestData = {
+                        type,
+                        ...data,
+                        employeeId: user.uid,
+                        firstName: employee.firstName,
+                        lastName: employee.lastName,
+                        status: 'in attesa',
+                        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+                        year: new Date().getFullYear()
+                    };
+                    
+                    return db.collection('requests').add(requestData);
+                }
+            })
+            .then(() => {
+                alert('Richiesta inviata con successo!');
+                loadMyRequests();
+                // Resetta i form
+                document.querySelectorAll('form').forEach(form => form.reset());
+            })
+            .catch(error => {
+                console.error('Errore:', error);
+                alert('Si è verificato un errore durante l\'invio della richiesta');
+            });
     }
-    
-    // Aggiungi i giorni del mese
-    for (let day = 1; day <= daysInMonth; day++) {
-        const dayElement = document.createElement('div');
-        dayElement.className = 'calendar-day';
-        
-        const dayNumber = document.createElement('div');
-        dayNumber.className = 'calendar-day-number';
-        dayNumber.textContent = day;
-        dayElement.appendChild(dayNumber);
-        
-        calendarGrid.appendChild(dayElement);
-    }
-    
-    // Carica gli eventi per questo mese
-    loadCalendarEvents(year, month + 1);
 }
 
-async function loadCalendarEvents(year, month) {
-    if (!currentUser) return;
+// Carica le richieste del dipendente
+function loadMyRequests() {
+    const user = auth.currentUser;
     
-    const startDate = new Date(year, month - 1, 1);
-    const endDate = new Date(year, month, 0, 23, 59, 59);
-    
-    let queryRef;
-    
-    if (document.querySelector('[data-role="admin"]:not(.hidden)')) {
-        // Admin: vede tutti gli eventi
-        queryRef = db.collection('richieste')
-            .where('dataInizio', '>=', startDate)
-            .where('dataInizio', '<=', endDate);
+    if (user) {
+        db.collection('requests')
+            .where('employeeId', '==', user.uid)
+            .orderBy('createdAt', 'desc')
+            .get()
+            .then(querySnapshot => {
+                const tbody = document.querySelector('#myRequestsTable tbody');
+                tbody.innerHTML = '';
+                
+                querySnapshot.forEach(doc => {
+                    const request = doc.data();
+                    const row = document.createElement('tr');
+                    
+                    row.innerHTML = `
+                        <td>${request.type}</td>
+                        <td>${formatRequestDate(request)}</td>
+                        <td><span class="status-badge ${request.status}">${request.status}</span></td>
+                        <td>${request.createdAt?.toDate().toLocaleDateString() || ''}</td>
+                    `;
+                    
+                    tbody.appendChild(row);
+                });
+            });
+    }
+}
+
+// Logout
+document.getElementById('logoutBtn').addEventListener('click', () => {
+    auth.signOut().then(() => {
+        window.location.href = 'index.html';
+    });
+});
+
+// Carica i dati all'avvio
+auth.onAuthStateChanged(user => {
+    if (user) {
+        db.collection('employees').doc(user.uid).get()
+            .then(doc => {
+                if (doc.exists && !doc.data().isAdmin) {
+                    const employee = doc.data();
+                    document.getElementById('userName').textContent = `${employee.firstName} ${employee.lastName}`;
+                    loadMyRequests();
+                } else {
+                    window.location.href = 'index.html';
+                }
+            });
     } else {
-        // Dipendente: vede solo i propri eventi
-        queryRef = db.collection('richieste')
-            .where('dipendenteId', '==', currentUser.uid)
-            .where('dataInizio', '>=', startDate)
-            .where('dataInizio', '<=', endDate);
+        window.location.href = 'index.html';
     }
-    
-    const snapshot = await queryRef.get();
-    
-    // Recupera i nomi dei dipendenti (solo per admin)
-    let employees = {};
-    if (document.querySelector('[data-role="admin"]:not(.hidden)')) {
-        const employeesSnapshot = await db.collection('dipendenti').get();
-        employeesSnapshot.forEach(doc => {
-            employees[doc.id] = doc.data();
-        });
-    }
-    
-    // Aggiungi gli eventi al calendario
-    snapshot.forEach(doc => {
-        const request = doc.data();
-        const startDate = request.dataInizio.toDate();
-        const day = startDate.getDate();
-        
-        const dayElements = document.querySelectorAll('.calendar-day:not(.empty)');
-        const dayElement = dayElements[day - 1];
-        
-        if (dayElement) {
-            const event = document.createElement('div');
-            event.className = `calendar-event event-${request.tipo}`;
-            
-            let eventText = request.tipo;
-            if (document.querySelector('[data-role="admin"]:not(.hidden)')) {
-                const employee = employees[request.dipendenteId] || { nome: 'N/A', cognome: '' };
-                eventText = `${employee.nome.charAt(0)}. ${employee.cognome}: ${request.tipo}`;
-            }
-            
-            event.textContent = eventText;
-            dayElement.appendChild(event);
-        }
-    });
-}
-
-// Navigazione mese
-document.getElementById('prev-month').addEventListener('click', () => {
-    currentCalendarDate.setMonth(currentCalendarDate.getMonth() - 1);
-    updateCalendar();
-});
-
-document.getElementById('next-month').addEventListener('click', () => {
-    currentCalendarDate.setMonth(currentCalendarDate.getMonth() + 1);
-    updateCalendar();
-});
-// Inizializzazione dell'app
-document.addEventListener('DOMContentLoaded', () => {
-    // Imposta la data di oggi nel form di nuova richiesta
-    const today = new Date().toISOString().split('T')[0];
-    document.getElementById('start-date').value = today;
-    document.getElementById('end-date').value = today;
-    
-    // Inizializza il calendario
-    updateCalendar();
 });

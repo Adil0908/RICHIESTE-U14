@@ -335,21 +335,19 @@ function applyFilters() {
         type: document.getElementById('filterType').value,
         employee: document.getElementById('filterEmployee').value.trim(),
         year: document.getElementById('filterYear').value,
-        month: document.getElementById('filterMonth').value,  // Nuovo campo
+        month: document.getElementById('filterMonth').value,
         status: document.getElementById('filterStatus').value
     };
     
-    // Validazione anno
-    if (currentFilters.year) {
-        const yearNum = parseInt(currentFilters.year);
-        if (isNaN(yearNum)) {
-            alert("Inserisci un anno valido (es. 2025)");
-            return;
-        }
+    // Se è selezionato il mese ma non l'anno, usa l'anno corrente
+    if (currentFilters.month && !currentFilters.year) {
+        currentFilters.year = new Date().getFullYear().toString();
+        document.getElementById('filterYear').value = currentFilters.year;
     }
     
     loadRequests(auth.currentUser, true);
 }
+   
 // Resetta i filtri
 function resetFilters() {
     document.getElementById('filterType').value = '';
@@ -368,6 +366,22 @@ function resetFilters() {
     
     loadRequests(auth.currentUser, true);
 }
+
+// Funzione di debug per verificare le date delle richieste
+async function debugCheckDates() {
+    const snapshot = await db.collection('richieste').get();
+    snapshot.forEach(doc => {
+        const data = doc.data();
+        console.log(`ID: ${doc.id}, Tipo: ${data.tipo}`);
+        
+        if (data.tipo === 'Permesso') {
+            console.log('Data permesso:', data.data?.toDate?.() || data.data);
+        } else {
+            console.log('Data inizio:', data.dataInizio?.toDate?.() || data.dataInizio);
+        }
+    });
+}
+
 
 // Modifica la funzione loadRequests per supportare i filtri
 async function loadRequests(user, isAdmin) {
@@ -388,31 +402,31 @@ async function loadRequests(user, isAdmin) {
             if (currentFilters.status) {
                 query = query.where('stato', '==', currentFilters.status);
             }
-            
-            // Filtro combinato anno+mese
-            if (currentFilters.year || currentFilters.month) {
-                const year = currentFilters.year ? parseInt(currentFilters.year) : new Date().getFullYear();
-                const month = currentFilters.month ? parseInt(currentFilters.month) - 1 : 0;
-                
-                const startDate = new Date(year, month, 1);
-                const endDate = currentFilters.month 
-                    ? new Date(year, month + 1, 1) 
-                    : new Date(year + 1, 0, 1);
-                
-                // Determiniamo il campo di ordinamento in base al tipo di richiesta
-                const orderField = currentFilters.type === 'Permesso' ? 'data' : 'dataInizio';
-                
-                // Prima ordiniamo per il campo di filtro
-                query = query.orderBy(orderField, 'desc');
-                
-                // Poi applichiamo il filtro
-                query = query.where(orderField, '>=', startDate)
-                             .where(orderField, '<', endDate);
-            }
         }
         
-        // Ordinamento finale
-        query = query.orderBy('createdAt', 'desc');
+        // Gestione separata dei filtri temporali
+        if (currentFilters.year || currentFilters.month) {
+            const year = currentFilters.year ? parseInt(currentFilters.year) : new Date().getFullYear();
+            const month = currentFilters.month ? parseInt(currentFilters.month) - 1 : 0;
+            
+            const startDate = new Date(year, month, 1);
+            const endDate = currentFilters.month 
+                ? new Date(year, month + 1, 1) 
+                : new Date(year + 1, 0, 1);
+            
+            // Determiniamo il campo data corretto in base al tipo
+            const dateField = currentFilters.type === 'Permesso' ? 'data' : 'dataInizio';
+            
+            // Applica il filtro temporale con un unico orderBy
+            query = query.orderBy(dateField, 'desc')
+                         .where(dateField, '>=', startDate)
+                         .where(dateField, '<', endDate);
+        }
+        
+        // Se non ci sono filtri temporali, ordina per createdAt
+        if (!currentFilters.year && !currentFilters.month) {
+            query = query.orderBy('createdAt', 'desc');
+        }
         
         const snapshot = await query.get();
         
@@ -447,37 +461,6 @@ async function loadRequests(user, isAdmin) {
                 </td>
             </tr>`;
     }
-}
-async function getRequestsIdsByDateConditions(conditions) {
-    const ids = [];
-    const db = firebase.firestore();
-    
-    for (const condition of conditions) {
-        let q = db.collection('richieste');
-        
-        if (condition[0] === 'tipo' && condition[1] === '==') {
-            q = q.where('tipo', '==', condition[2]);
-        } else if (condition[0] === 'tipo' && condition[1] === 'in') {
-            q = q.where('tipo', 'in', condition[2]);
-        }
-        
-        if (condition[0] === 'data') {
-            q = q.where('data', '>=', condition[1])
-                 .where('data', '<', condition[2]);
-        } else if (condition[0] === 'dataInizio') {
-            q = q.where('dataInizio', '>=', condition[1])
-                 .where('dataInizio', '<', condition[2]);
-        }
-        
-        const snapshot = await q.select(firebase.firestore.FieldPath.documentId()).get();
-        snapshot.forEach(doc => {
-            if (!ids.includes(doc.id)) {
-                ids.push(doc.id);
-            }
-        });
-    }
-    
-    return ids;
 }
 function generatePDF() {
     const { jsPDF } = window.jspdf;
@@ -594,7 +577,13 @@ function createRequestRow(requestId, data, isAdmin) {
         periodo = formatDate(data.data);
         dettagli = `${data.oraInizio} - ${data.oraFine} (${data.motivazione || 'Nessuna motivazione'})`;
     }
-
+ console.log('Dati richiesta:', {
+        id: requestId,
+        tipo: data.tipo,
+        data: data.data?.toDate?.() || data.data,
+        dataInizio: data.dataInizio?.toDate?.() || data.dataInizio,
+        createdAt: data.createdAt?.toDate?.() || data.createdAt
+    });
     // Gestione sicura della data di creazione
     const createdAt = data.createdAt ? 
         (data.createdAt.toDate ? data.createdAt.toDate() : new Date(data.createdAt)) : 

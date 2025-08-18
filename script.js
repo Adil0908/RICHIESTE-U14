@@ -35,6 +35,7 @@ let currentFilters = {
     type: '',
     employee: '',
     year: '',
+    month: '',  // Aggiunto il filtro mese
     status: ''
 };
 
@@ -334,6 +335,7 @@ function applyFilters() {
         type: document.getElementById('filterType').value,
         employee: document.getElementById('filterEmployee').value.trim(),
         year: document.getElementById('filterYear').value,
+        month: document.getElementById('filterMonth').value,  // Nuovo campo
         status: document.getElementById('filterStatus').value
     };
     
@@ -353,12 +355,14 @@ function resetFilters() {
     document.getElementById('filterType').value = '';
     document.getElementById('filterEmployee').value = '';
     document.getElementById('filterYear').value = '';
+    document.getElementById('filterMonth').value = '';  // Reset del mese
     document.getElementById('filterStatus').value = '';
     
     currentFilters = {
         type: '',
         employee: '',
         year: '',
+        month: '',  // Reset del mese
         status: ''
     };
     
@@ -371,7 +375,6 @@ async function loadRequests(user, isAdmin) {
     richiesteBody.innerHTML = '<tr><td colspan="6">Caricamento in corso...</td></tr>';
 
     try {
-        // Inizializza la query correttamente
         let query = db.collection('richieste');
         
         // Filtro base per ruolo
@@ -385,25 +388,32 @@ async function loadRequests(user, isAdmin) {
             if (currentFilters.status) {
                 query = query.where('stato', '==', currentFilters.status);
             }
-            if (currentFilters.year) {
-                const year = parseInt(currentFilters.year);
-                if (!isNaN(year)) {
-                    const startDate = new Date(year, 0, 1);
-                    const endDate = new Date(year + 1, 0, 1);
-                    
-                    if (currentFilters.type === 'Permesso') {
-                        query = query.where('data', '>=', startDate)
-                                   .where('data', '<', endDate);
-                    } else {
-                        query = query.where('dataInizio', '>=', startDate)
-                                   .where('dataInizio', '<', endDate);
-                    }
-                }
+            
+            // Filtro combinato anno+mese
+            if (currentFilters.year || currentFilters.month) {
+                const year = currentFilters.year ? parseInt(currentFilters.year) : new Date().getFullYear();
+                const month = currentFilters.month ? parseInt(currentFilters.month) - 1 : 0;
+                
+                const startDate = new Date(year, month, 1);
+                const endDate = currentFilters.month 
+                    ? new Date(year, month + 1, 1) 
+                    : new Date(year + 1, 0, 1);
+                
+                // Determiniamo il campo di ordinamento in base al tipo di richiesta
+                const orderField = currentFilters.type === 'Permesso' ? 'data' : 'dataInizio';
+                
+                // Prima ordiniamo per il campo di filtro
+                query = query.orderBy(orderField, 'desc');
+                
+                // Poi applichiamo il filtro
+                query = query.where(orderField, '>=', startDate)
+                             .where(orderField, '<', endDate);
             }
         }
         
-        // Esegui la query
+        // Ordinamento finale
         query = query.orderBy('createdAt', 'desc');
+        
         const snapshot = await query.get();
         
         // Filtro lato client per nome (se necessario)

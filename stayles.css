@@ -324,3 +324,22 @@ tr:hover {
     border-radius: 5px;
     box-shadow: 0 2px 5px rgba(0,0,0,0.1);
 }
+/* Stile per il selettore del mese */
+#filterMonth {
+    width: 100%;
+    padding: 8px;
+    border: 1px solid #ced4da;
+    border-radius: 4px;
+    background-color: white;
+}
+
+/* Responsive design per i filtri */
+@media (max-width: 768px) {
+    .filter-group {
+        margin-bottom: 10px;
+    }
+    
+    #filterMonth {
+        padding: 6px;
+    }
+}

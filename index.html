@@ -10,7 +10,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Gestione Richieste - Ferie, Permessi, Malattia</title>
-    <link rel="stylesheet" href="stayles.css">
+    <link rel="stylesheet" href="styles.css">
 </head>
 <body>
     <div id="loginContainer" class="login-container">
@@ -92,6 +92,24 @@
            min="2000" max="2030" 
            placeholder="Es. 2025" 
            class="form-control">
+</div>
+<div class="filter-group">
+    <label for="filterMonth">Mese:</label>
+    <select id="filterMonth" class="form-control">
+        <option value="">Tutti i mesi</option>
+        <option value="1">Gennaio</option>
+        <option value="2">Febbraio</option>
+        <option value="3">Marzo</option>
+        <option value="4">Aprile</option>
+        <option value="5">Maggio</option>
+        <option value="6">Giugno</option>
+        <option value="7">Luglio</option>
+        <option value="8">Agosto</option>
+        <option value="9">Settembre</option>
+        <option value="10">Ottobre</option>
+        <option value="11">Novembre</option>
+        <option value="12">Dicembre</option>
+    </select>
 </div>
         
         <div class="filter-group">
@@ -221,4 +239,3 @@
     <script src="script.js"></script>
 </body>
 </html>
-

@@ -1,242 +1,513 @@
 <!DOCTYPE html>
 <html lang="it">
 <head>
-    <!-- Aggiungi nell'head del tuo HTML -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-auth-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-firestore-compat.js"></script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Gestione Richieste - Ferie, Permessi, Malattia</title>
-    <link rel="stylesheet" href="stayles.css">
+    <title>Gestione Richieste - Union14</title>
+    <meta name="description" content="Sistema di gestione richieste ferie, permessi e malattia">
+    
+    <!-- Preconnessioni per performance -->
+    <link rel="preconnect" href="https://www.gstatic.com">
+    <link rel="preconnect" href="https://cdnjs.cloudflare.com">
+    
+    <!-- Firebase SDKs -->
+    <script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-messaging.js"></script>
+    
+    <!-- PDF Libraries -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
+    
+    <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-    <div id="loginContainer" class="login-container">
-    <div class="login-box">
-        <h2>Accesso</h2>
-        <form id="loginForm">
-            <div class="form-group">
-                <label for="email">Email:</label>
-                <input type="email" id="email" required>
-            </div>
-            <div class="form-group">
-                <label for="password">Password:</label>
-                <input type="password" id="password" required>
-            </div>
-            <button type="submit" class="submit-btn">Accedi</button>
-            <div class="auth-links">
-                <a href="#" id="registerLink">Registrati</a>
-                <a href="#" id="resetPasswordLink">Password dimenticata?</a>
-            </div>
-            
-            
-        </form>
-        <form id="registerForm" style="display:none;">
-            <div class="form-group">
-                <label for="regName">Nome completo:</label>
-                <input type="text" id="regName" required>
-            </div>
-            <div class="form-group">
-                <label for="regEmail">Email:</label>
-                <input type="email" id="regEmail" required>
-            </div>
-            <div class="form-group">
-                <label for="regPassword">Password (min 6 caratteri):</label>
-                <input type="password" id="regPassword" minlength="6" required>
-            </div>
-            <button type="submit" class="submit-btn">Registrati</button>
-            <div class="auth-links">
-                <a href="#" id="loginLink">Hai già un account? Accedi</a>
-            </div>
-        </form>
-        <div id="loginError" class="error-message"></div>
-        </div>
-        </div>
-        <div id="mainContainer" style="display:none;">
-      <div id="adminControls" style="display: none;">
-    <h2>Pannello Amministratore</h2>
-    <div class="admin-actions">
-        <button id="registerEmployeeBtn">Registra Dipendente</button>
-       <button id="exportPDF" onclick="exportToPDF()">Esporta in PDF</button>
+    <!-- Screen Reader Only -->
+    <div class="sr-only" aria-live="polite" aria-atomic="true">
+        <span id="srAnnouncement"></span>
     </div>
-    
-</div>
-    <div class="container">
-        <h1>Gestione Richieste</h1>
-        <div class="user-menu">
-    <span id="loggedInUser"></span>
-    <button id="logoutBtn" class="logout-btn">Esci</button>
-    <div id="adminFilters" style="margin-bottom: 20px; display: none;">
-    <h3>Filtri Ricerca</h3>
-    <div class="filter-row">
-        <div class="filter-group">
-            <label for="filterType">Tipo Richiesta:</label>
-            <select id="filterType" class="filter-control">
-                <option value="">Tutti</option>
-                <option value="Ferie">Ferie</option>
-                <option value="Malattia">Malattia</option>
-                <option value="Permesso">Permesso</option>
-            </select>
-        </div>
-        
-        <div class="filter-group">
-            <label for="filterEmployee">Dipendente:</label>
-            <input type="text" id="filterEmployee" class="filter-control" placeholder="Nome dipendente">
-        </div>
-        
-       <div class="filter-group">
-    <label for="filterYear">Anno:</label>
-    <input type="number" id="filterYear" 
-           min="2000" max="2030" 
-           placeholder="Es. 2025" 
-           class="form-control">
-</div>
-<div class="filter-group">
-    <label for="filterMonth">Mese:</label>
-    <select id="filterMonth" class="form-control">
-        <option value="">Tutti i mesi</option>
-        <option value="1">Gennaio</option>
-        <option value="2">Febbraio</option>
-        <option value="3">Marzo</option>
-        <option value="4">Aprile</option>
-        <option value="5">Maggio</option>
-        <option value="6">Giugno</option>
-        <option value="7">Luglio</option>
-        <option value="8">Agosto</option>
-        <option value="9">Settembre</option>
-        <option value="10">Ottobre</option>
-        <option value="11">Novembre</option>
-        <option value="12">Dicembre</option>
-    </select>
-</div>
-        
-        <div class="filter-group">
-            <label for="filterStatus">Stato:</label>
-            <select id="filterStatus" class="filter-control">
-                <option value="">Tutti</option>
-                <option value="In attesa">In attesa</option>
-                <option value="Approvato">Approvato</option>
-                <option value="Rifiutato">Rifiutato</option>
-            </select>
-        </div>
-        
-        <button id="applyFilters" class="btn">Applica Filtri</button>
-        <button id="resetFilters" class="btn secondary">Reset</button>
-        
-    </div>
-</div>
-</div>
 
-<div id="richiesteInviate" >
-            <h2>Richieste Inviate</h2>
-            <table id="richiesteTable">
-                <thead>
-                    <tr>
-                        <th>Tipo</th>
-                        <th>Nome</th>
-                        <th>Periodo</th>
-                        <th>Dettagli</th>
-                        <th>Stato</th>
-                        <th id="azioniHeader" style="display:none;">Azioni</th>
-                    </tr>
-                </thead>
-                <tbody id="richiesteBody">
-                    <!-- Le richieste verranno aggiunte qui dinamicamente -->
-                </tbody>
-            </table>
-        </div>
-        <!-- Form richieste: visibile solo ai dipendenti -->
-        <div id="requestForms">
-            <div class="tabs">
-                <button class="tab-button active" data-tab="ferie">Ferie</button>
-                <button class="tab-button" data-tab="malattia">Malattia</button>
-                <button class="tab-button" data-tab="permessi">Permessi</button>
+    <!-- Modals -->
+    <dialog id="confirmationDialog" class="modal">
+        <div class="modal-content">
+            <h3 id="confirmationTitle">Conferma Azione</h3>
+            <p id="confirmationMessage">Sei sicuro di voler procedere?</p>
+            <div class="modal-actions">
+                <button id="confirmAction" class="btn btn-danger">Conferma</button>
+                <button id="cancelAction" class="btn btn-secondary">Annulla</button>
             </div>
-        
-        <div id="ferie" class="tab-content active">
-            <h2>Richiesta Ferie</h2>
-            <form id="ferieForm">
-                <div class="form-group">
-                    <label for="ferieNome">Nome e Cognome:</label>
-                    <input type="text" id="ferieNome" required>
-                </div>
-                <div class="form-group">
-                    <label for="ferieDataInizio">Data Inizio:</label>
-                    <input type="date" id="ferieDataInizio" required>
-                </div>
-                <div class="form-group">
-                    <label for="ferieDataFine">Data Fine:</label>
-                    <input type="date" id="ferieDataFine" required>
-                </div>
-                <div class="form-group">
-                    <label for="ferieGiorni">Giorni richiesti:</label>
-                    <input type="number" id="ferieGiorni" min="1" required>
-                </div>
-                <button type="submit" class="submit-btn">Invia Richiesta</button>
-            </form>
         </div>
-        
-        <div id="malattia" class="tab-content">
-            <h2>Richiesta Malattia</h2>
-            <form id="malattiaForm">
-                <div class="form-group">
-                    <label for="malattiaNome">Nome e Cognome:</label>
-                    <input type="text" id="malattiaNome" required>
-                </div>
-                <div class="form-group">
-                    <label for="malattiaDataInizio">Data Inizio:</label>
-                    <input type="date" id="malattiaDataInizio" required>
-                </div>
-                <div class="form-group">
-                    <label for="malattiaDataFine">Data Fine:</label>
-                    <input type="date" id="malattiaDataFine" required>
-                </div>
-                <div class="form-group">
-                    <label for="malattiaNumeroCertificato">Numero Certificato:</label>
-                    <input type="text" id="malattiaNumeroCertificato" required>
-                </div>
-                <div class="form-group">
-                    <label for="malattiaDataCertificato">Data Certificato:</label>
-                    <input type="date" id="malattiaDataCertificato" required>
-                </div>
-                <button type="submit" class="submit-btn">Invia Richiesta</button>
-            </form>
+    </dialog>
+
+    <dialog id="feedbackDialog" class="modal">
+        <div class="modal-content">
+            <h3 id="feedbackTitle">Informazione</h3>
+            <p id="feedbackMessage"></p>
+            <div class="modal-actions">
+                <button id="closeFeedback" class="btn btn-primary">Chiudi</button>
+            </div>
         </div>
-        
-        <div id="permessi" class="tab-content" >
-            <h2>Richiesta Permessi</h2>
-            <form id="permessiForm">
-                <div class="form-group">
-                    <label for="permessiNome">Nome e Cognome:</label>
-                    <input type="text" id="permessiNome" required>
-                </div>
-                <div class="form-group">
-                    <label for="permessiData">Data Permesso:</label>
-                    <input type="date" id="permessiData" required>
-                </div>
-                <div class="form-group">
-                    <label for="permessiOraInizio">Ora Inizio:</label>
-                    <input type="time" id="permessiOraInizio" required>
-                </div>
-                <div class="form-group">
-                    <label for="permessiOraFine">Ora Fine:</label>
-                    <input type="time" id="permessiOraFine" required>
-                </div>
-                <div class="form-group">
-                    <label for="permessiMotivazione">Motivazione:</label>
-                    <textarea id="permessiMotivazione" rows="3"></textarea>
-                </div>
-                <button type="submit" class="submit-btn">Invia Richiesta</button>
-            </form>
+    </dialog>
+
+    <!-- Main Content -->
+    <main class="main-content">
+        <!-- Login Container -->
+        <div id="loginContainer" class="login-container" aria-live="polite">
+            <div class="login-box">
+                <header class="login-header">
+                    <h1>Accesso Sistema Richieste</h1>
+                    <p>Gestione richieste ferie, permessi e malattia</p>
+                </header>
+
+                <!-- Login Form -->
+                <form id="loginForm" role="form" aria-labelledby="loginHeading" class="auth-form">
+                    <h2 id="loginHeading" class="sr-only">Modulo di accesso</h2>
+                    
+                    <div class="form-group">
+                        <label for="email" class="form-label required">Email</label>
+                        <input type="email" id="email" class="form-control" required 
+                               aria-required="true" autocomplete="email"
+                               placeholder="nome@esempio.com">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="password" class="form-label required">Password</label>
+                        <input type="password" id="password" class="form-control" required 
+                               aria-required="true" autocomplete="current-password"
+                               placeholder="Inserisci la tua password">
+                    </div>
+                    
+                    <button type="submit" class="btn btn-primary btn-block" aria-label="Accedi al sistema">
+                        <span class="btn-text">Accedi</span>
+                        <span class="btn-loading" style="display: none;">
+                            <span class="loading-spinner"></span>
+                            Accesso in corso...
+                        </span>
+                    </button>
+                    
+                    <div class="auth-links">
+                        <a href="#" id="registerLink" role="button" class="auth-link">Crea nuovo account</a>
+                        <a href="#" id="resetPasswordLink" role="button" class="auth-link">Password dimenticata?</a>
+                    </div>
+                </form>
+
+                <!-- Register Form -->
+                <form id="registerForm" style="display:none;" role="form" aria-labelledby="registerHeading" class="auth-form">
+                    <h2 id="registerHeading" class="sr-only">Modulo di registrazione</h2>
+                    
+                    <div class="form-group">
+                        <label for="regName" class="form-label required">Nome completo</label>
+                        <input type="text" id="regName" class="form-control" required
+                               aria-required="true" autocomplete="name"
+                               placeholder="Nome e Cognome"
+                               pattern="[A-Za-z\s]{2,}">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="regEmail" class="form-label required">Email</label>
+                        <input type="email" id="regEmail" class="form-control" required
+                               aria-required="true" autocomplete="email"
+                               placeholder="nome@esempio.com">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="regPassword" class="form-label required">Password</label>
+                        <input type="password" id="regPassword" class="form-control" 
+                               minlength="6" required aria-required="true"
+                               placeholder="Minimo 6 caratteri"
+                               autocomplete="new-password">
+                        <small class="form-help">La password deve essere di almeno 6 caratteri</small>
+                    </div>
+                    
+                    <button type="submit" class="btn btn-primary btn-block">
+                        <span class="btn-text">Registrati</span>
+                        <span class="btn-loading" style="display: none;">
+                            <span class="loading-spinner"></span>
+                            Registrazione in corso...
+                        </span>
+                    </button>
+                    
+                    <div class="auth-links">
+                        <a href="#" id="loginLink" role="button" class="auth-link">Hai già un account? Accedi</a>
+                    </div>
+                </form>
+
+                <!-- Error Message -->
+                <div id="loginError" class="error-message" role="alert" aria-live="assertive"></div>
+            </div>
         </div>
-        
-        
-    </div>
-    </div>
-    
+
+        <!-- Main Application Container -->
+        <div id="mainContainer" class="main-app" style="display:none;" aria-live="polite">
+            <!-- Header -->
+            <header class="app-header">
+                <div class="header-content">
+                    <h1>Gestione Richieste</h1>
+                    <div class="user-menu">
+                        <span id="loggedInUser" class="user-info"></span>
+                        <button id="logoutBtn" class="btn btn-outline logout-btn" aria-label="Esci dal sistema">
+                            Esci
+                        </button>
+                    </div>
+                </div>
+            </header>
+
+            <!-- Admin Controls -->
+            <section id="adminControls" style="display: none;" class="admin-section" aria-labelledby="adminHeading">
+                <h2 id="adminHeading">Pannello Amministratore</h2>
+                
+                <div class="admin-actions">
+                    <button id="registerEmployeeBtn" class="btn btn-success">
+                        <span class="btn-text">Registra Dipendente</span>
+                        <span class="btn-loading" style="display: none;">
+                            <span class="loading-spinner"></span>
+                            Registrazione...
+                        </span>
+                    </button>
+                    <button id="exportPDF" class="btn btn-info" onclick="exportToPDF()">
+                        Esporta in PDF
+                    </button>
+                </div>
+
+                <!-- Employee Management -->
+                <div class="admin-subsection">
+                    <h3>Registro Dipendenti</h3>
+                    <div class="admin-actions">
+                        <button id="showEmployeesBtn" class="btn btn-primary">
+                            <span class="btn-text" data-show="Visualizza Dipendenti" data-hide="Nascondi Dipendenti">
+                                Visualizza Dipendenti
+                            </span>
+                        </button>
+                    </div>
+                    
+                    <div id="employeesList" style="display: none;" class="table-section">
+                        <div class="table-container">
+                            <table class="requests-table" aria-describedby="employeesTableDesc">
+                                <caption class="sr-only" id="employeesTableDesc">
+                                    Elenco dei dipendenti registrati nel sistema
+                                </caption>
+                                <thead>
+                                    <tr>
+                                        <th scope="col">Nome</th>
+                                        <th scope="col">Email</th>
+                                        <th scope="col">Ruolo</th>
+                                        <th scope="col">Data Registrazione</th>
+                                        <th scope="col">Stato Password</th>
+                                        <th scope="col">Azioni</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="employeesBody">
+                                    <tr>
+                                        <td colspan="6" class="text-center">Caricamento dipendenti...</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Admin Filters -->
+                <div id="adminFilters" class="filters-section" style="display: none;">
+                    <h3>Filtri Ricerca</h3>
+                    <div class="filter-grid">
+                        <div class="filter-group">
+                            <label for="filterType" class="filter-label">Tipo Richiesta</label>
+                            <select id="filterType" class="form-control filter-control">
+                                <option value="">Tutti i tipi</option>
+                                <option value="Ferie">Ferie</option>
+                                <option value="Malattia">Malattia</option>
+                                <option value="Permesso">Permesso</option>
+                            </select>
+                        </div>
+                        
+                        <div class="filter-group">
+                            <label for="filterEmployee" class="filter-label">Dipendente</label>
+                            <input type="text" id="filterEmployee" class="form-control filter-control" 
+                                   placeholder="Cerca per nome..." aria-label="Cerca dipendente per nome">
+                        </div>
+                        
+                        <div class="filter-group">
+                            <label for="filterYear" class="filter-label">Anno</label>
+                            <input type="number" id="filterYear" class="form-control"
+                                   min="2000" max="2030" 
+                                   placeholder="Es. 2025" 
+                                   aria-label="Filtra per anno">
+                        </div>
+                        
+                        <div class="filter-group">
+                            <label for="filterMonth" class="filter-label">Mese</label>
+                            <select id="filterMonth" class="form-control">
+                                <option value="">Tutti i mesi</option>
+                                <option value="1">Gennaio</option>
+                                <option value="2">Febbraio</option>
+                                <option value="3">Marzo</option>
+                                <option value="4">Aprile</option>
+                                <option value="5">Maggio</option>
+                                <option value="6">Giugno</option>
+                                <option value="7">Luglio</option>
+                                <option value="8">Agosto</option>
+                                <option value="9">Settembre</option>
+                                <option value="10">Ottobre</option>
+                                <option value="11">Novembre</option>
+                                <option value="12">Dicembre</option>
+                            </select>
+                        </div>
+                        
+                        <div class="filter-group">
+                            <label for="filterStatus" class="filter-label">Stato</label>
+                            <select id="filterStatus" class="form-control filter-control">
+                                <option value="">Tutti gli stati</option>
+                                <option value="In attesa">In attesa</option>
+                                <option value="Approvato">Approvato</option>
+                                <option value="Rifiutato">Rifiutato</option>
+                            </select>
+                        </div>
+                        
+                        <div class="filter-actions">
+                            <button id="applyFilters" class="btn btn-primary" aria-label="Applica i filtri selezionati">
+                                Applica Filtri
+                            </button>
+                            <button id="resetFilters" class="btn btn-secondary" aria-label="Reimposta tutti i filtri">
+                                Reset
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Requests Section -->
+            <section id="richiesteInviate" class="requests-section" aria-labelledby="richiesteHeading">
+                <h2 id="richiesteHeading">Richieste Inviate</h2>
+                
+                <div class="table-responsive" role="region" aria-labelledby="richiesteHeading">
+                    <table id="richiesteTable" class="requests-table" aria-describedby="richiesteTableDesc">
+                        <caption class="sr-only" id="richiesteTableDesc">
+                            Elenco delle richieste inviate con tipo, periodo, dettagli e stato di approvazione
+                        </caption>
+                        <thead>
+                            <tr>
+                                <th scope="col">Tipo</th>
+                                <th scope="col">Nome</th>
+                                <th scope="col">Periodo</th>
+                                <th scope="col">Dettagli</th>
+                                <th scope="col">Stato</th>
+                                <th scope="col" id="azioniHeader" style="display:none;">Azioni</th>
+                            </tr>
+                        </thead>
+                        <tbody id="richiesteBody">
+                            <tr>
+                                <td colspan="6" class="text-center">Nessuna richiesta trovata</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                
+                <!-- Pagination -->
+                <div class="pagination" id="paginationControls" style="display: none;">
+                    <button id="prevPage" class="btn btn-pagination" disabled aria-label="Pagina precedente">
+                        Precedente
+                    </button>
+                    <span id="pageInfo" class="page-info" aria-live="polite">Pagina 1 di 1</span>
+                    <button id="nextPage" class="btn btn-pagination" disabled aria-label="Pagina successiva">
+                        Successiva
+                    </button>
+                </div>
+            </section>
+
+            <!-- Request Forms (Visible only to employees) -->
+            <section id="requestForms" class="forms-section" aria-labelledby="formsHeading">
+                <h2 id="formsHeading" class="sr-only">Moduli per l'invio di richieste</h2>
+                
+                <div class="tabs" role="tablist" aria-label="Tipi di richieste">
+                    <button class="tab-button active" role="tab" aria-selected="true" 
+                            aria-controls="ferie-tab" data-tab="ferie" id="ferie-tab-btn">
+                        Ferie
+                    </button>
+                    <button class="tab-button" role="tab" aria-selected="false" 
+                            aria-controls="malattia-tab" data-tab="malattia" id="malattia-tab-btn">
+                        Malattia
+                    </button>
+                    <button class="tab-button" role="tab" aria-selected="false" 
+                            aria-controls="permessi-tab" data-tab="permessi" id="permessi-tab-btn">
+                        Permessi
+                    </button>
+                </div>
+
+                <!-- Ferie Form -->
+                <div id="ferie" class="tab-content active" role="tabpanel" aria-labelledby="ferie-tab-btn" tabindex="0">
+                    <form id="ferieForm" class="request-form" novalidate aria-labelledby="ferieFormHeading">
+                        <h3 id="ferieFormHeading">Richiesta Ferie</h3>
+                        
+                        <div class="form-group">
+                            <label for="ferieNome" class="form-label required">Nome e Cognome</label>
+                            <input type="text" id="ferieNome" class="form-control" required 
+                                   aria-required="true" readonly
+                                   aria-describedby="ferieNomeHelp">
+                            <small id="ferieNomeHelp" class="form-help">
+                                Nome automaticamente impostato dal tuo profilo
+                            </small>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="ferieDataInizio" class="form-label required">Data Inizio</label>
+                                <input type="date" id="ferieDataInizio" class="form-control" required
+                                       aria-required="true" aria-describedby="ferieDataInizioHelp">
+                                <small id="ferieDataInizioHelp" class="form-help">
+                                    Data di inizio ferie
+                                </small>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="ferieDataFine" class="form-label required">Data Fine</label>
+                                <input type="date" id="ferieDataFine" class="form-control" required
+                                       aria-required="true" aria-describedby="ferieDataFineHelp">
+                                <small id="ferieDataFineHelp" class="form-help">
+                                    Data di fine ferie
+                                </small>
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="ferieGiorni" class="form-label required">Giorni richiesti</label>
+                            <input type="number" id="ferieGiorni" class="form-control" min="1" required
+                                   readonly aria-describedby="ferieGiorniHelp">
+                            <small id="ferieGiorniHelp" class="form-help">
+                                Calcolo automatico basato sulle date selezionate
+                            </small>
+                        </div>
+
+                        <div class="form-actions">
+                            <button type="submit" class="btn btn-primary">
+                                <span class="btn-text">Invia Richiesta</span>
+                                <span class="btn-loading" style="display: none;">
+                                    <span class="loading-spinner"></span>
+                                    Invio in corso...
+                                </span>
+                            </button>
+                            <button type="reset" class="btn btn-secondary">Annulla</button>
+                        </div>
+                    </form>
+                </div>
+
+                <!-- Malattia Form -->
+                <div id="malattia" class="tab-content" role="tabpanel" aria-labelledby="malattia-tab-btn" tabindex="0">
+                    <form id="malattiaForm" class="request-form" novalidate aria-labelledby="malattiaFormHeading">
+                        <h3 id="malattiaFormHeading">Richiesta Malattia</h3>
+                        
+                        <div class="form-group">
+                            <label for="malattiaNome" class="form-label required">Nome e Cognome</label>
+                            <input type="text" id="malattiaNome" class="form-control" required 
+                                   aria-required="true" readonly
+                                   aria-describedby="malattiaNomeHelp">
+                            <small id="malattiaNomeHelp" class="form-help">
+                                Nome automaticamente impostato dal tuo profilo
+                            </small>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="malattiaDataInizio" class="form-label required">Data Inizio</label>
+                                <input type="date" id="malattiaDataInizio" class="form-control" required
+                                       aria-required="true">
+                            </div>
+
+                            <div class="form-group">
+                                <label for="malattiaDataFine" class="form-label required">Data Fine</label>
+                                <input type="date" id="malattiaDataFine" class="form-control" required
+                                       aria-required="true">
+                            </div>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="malattiaNumeroCertificato" class="form-label required">Numero Certificato</label>
+                                <input type="text" id="malattiaNumeroCertificato" class="form-control" required
+                                       aria-required="true" placeholder="Inserisci numero certificato">
+                            </div>
+
+                            <div class="form-group">
+                                <label for="malattiaDataCertificato" class="form-label required">Data Certificato</label>
+                                <input type="date" id="malattiaDataCertificato" class="form-control" required
+                                       aria-required="true">
+                            </div>
+                        </div>
+
+                        <div class="form-actions">
+                            <button type="submit" class="btn btn-primary">
+                                <span class="btn-text">Invia Richiesta</span>
+                                <span class="btn-loading" style="display: none;">
+                                    <span class="loading-spinner"></span>
+                                    Invio in corso...
+                                </span>
+                            </button>
+                            <button type="reset" class="btn btn-secondary">Annulla</button>
+                        </div>
+                    </form>
+                </div>
+
+                <!-- Permessi Form -->
+                <div id="permessi" class="tab-content" role="tabpanel" aria-labelledby="permessi-tab-btn" tabindex="0">
+                    <form id="permessiForm" class="request-form" novalidate aria-labelledby="permessiFormHeading">
+                        <h3 id="permessiFormHeading">Richiesta Permessi</h3>
+                        
+                        <div class="form-group">
+                            <label for="permessiNome" class="form-label required">Nome e Cognome</label>
+                            <input type="text" id="permessiNome" class="form-control" required 
+                                   aria-required="true" readonly
+                                   aria-describedby="permessiNomeHelp">
+                            <small id="permessiNomeHelp" class="form-help">
+                                Nome automaticamente impostato dal tuo profilo
+                            </small>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="permessiData" class="form-label required">Data Permesso</label>
+                            <input type="date" id="permessiData" class="form-control" required
+                                   aria-required="true">
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="permessiOraInizio" class="form-label required">Ora Inizio</label>
+                                <input type="time" id="permessiOraInizio" class="form-control" required
+                                       aria-required="true">
+                            </div>
+
+                            <div class="form-group">
+                                <label for="permessiOraFine" class="form-label required">Ora Fine</label>
+                                <input type="time" id="permessiOraFine" class="form-control" required
+                                       aria-required="true">
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="permessiMotivazione" class="form-label">Motivazione</label>
+                            <textarea id="permessiMotivazione" class="form-control" rows="3"
+                                      placeholder="Breve descrizione della motivazione (opzionale)"
+                                      aria-describedby="permessiMotivazioneHelp"></textarea>
+                            <small id="permessiMotivazioneHelp" class="form-help">
+                                Campo opzionale per specificare la motivazione del permesso
+                            </small>
+                        </div>
+
+                        <div class="form-actions">
+                            <button type="submit" class="btn btn-primary">
+                                <span class="btn-text">Invia Richiesta</span>
+                                <span class="btn-loading" style="display: none;">
+                                    <span class="loading-spinner"></span>
+                                    Invio in corso...
+                                </span>
+                            </button>
+                            <button type="reset" class="btn btn-secondary">Annulla</button>
+                        </div>
+                    </form>
+                </div>
+            </section>
+        </div>
+    </main>
+
     <script src="script.js"></script>
 </body>
 </html>
-

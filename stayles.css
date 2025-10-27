@@ -828,3 +828,82 @@ input[type="date"]:focus + .date-hint {
     color: #6c757d;
     margin-top: 0.25rem;
 }
+/* AGGIUNGI QUESTI STILI AL TUO CSS */
+
+/* Stili per la colonna azioni su desktop */
+.actions-cell {
+    white-space: nowrap;
+    min-width: 200px; /* Larghezza minima per contenere i pulsanti */
+}
+
+.actions-cell .btn {
+    margin: 2px;
+    font-size: 12px;
+    padding: 6px 10px;
+}
+
+/* Per schermi più piccoli */
+@media (max-width: 1200px) {
+    .actions-cell {
+        min-width: 180px;
+    }
+    
+    .actions-cell .btn {
+        font-size: 11px;
+        padding: 5px 8px;
+    }
+}
+
+/* Layout migliorato per la colonna azioni */
+.actions-cell {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    align-items: stretch;
+}
+
+.actions-cell .status-select {
+    width: 100%;
+    margin-bottom: 5px;
+    font-size: 12px;
+    padding: 4px;
+}
+
+.actions-cell .btn {
+    width: 100%;
+    text-align: center;
+}
+
+/* Alternativa: layout orizzontale per desktop */
+@media (min-width: 768px) {
+    .actions-cell {
+        flex-direction: row;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 5px;
+    }
+    
+    .actions-cell .status-select {
+        width: 120px;
+        margin-bottom: 0;
+        margin-right: 5px;
+    }
+    
+    .actions-cell .btn {
+        width: auto;
+        flex: 1;
+        min-width: 60px;
+    }
+}
+
+/* Stile per la tabella per prevenire il wrapping */
+.requests-table {
+    table-layout: fixed;
+}
+
+.requests-table th:nth-child(1) { width: 10%; } /* Tipo */
+.requests-table th:nth-child(2) { width: 15%; } /* Nome */
+.requests-table th:nth-child(3) { width: 20%; } /* Periodo */
+.requests-table th:nth-child(4) { width: 25%; } /* Dettagli */
+.requests-table th:nth-child(5) { width: 10%; } /* Stato */
+.requests-table th:nth-child(6) { width: 20%; } /* Azioni */

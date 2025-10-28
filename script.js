@@ -439,7 +439,10 @@ function resetFilters() {
 }
 
 // Carica richieste con paginazione
-async function loadRequests(user, isAdmin) {
+// SOSTITUISCI la funzione loadRequests con questa versione migliorata:
+
+// Carica richieste con paginazione
+async function loadRequests(user, isAdmin, forceRefresh = false) {
     const richiesteBody = elements.richiesteBody;
     
     // Mostra loading
@@ -480,14 +483,17 @@ async function loadRequests(user, isAdmin) {
             query = query.orderBy('createdAt', 'desc');
         }
         
-        const snapshot = await query.get();
+        // Se forceRefresh è true, bypassa la cache
+        const options = forceRefresh ? { source: 'server' } : {};
+        const snapshot = await query.get(options);
         
         // Filtro lato client per nome
         let filteredDocs = snapshot.docs;
         if (isAdmin && appState.filters.employee) {
             const searchTerm = appState.filters.employee.toLowerCase();
             filteredDocs = filteredDocs.filter(doc => {
-                const userName = doc.data().userName?.toLowerCase() || '';
+                const data = doc.data();
+                const userName = data.userName?.toLowerCase() || '';
                 return userName.includes(searchTerm);
             });
         }
@@ -509,7 +515,18 @@ async function loadRequests(user, isAdmin) {
         showTableError(richiesteBody, error);
     }
 }
-
+async function debugCheckRequest(requestId) {
+    try {
+        const doc = await db.collection('richieste').doc(requestId).get();
+        if (doc.exists) {
+            console.log('Richiesta aggiornata:', doc.id, doc.data());
+        } else {
+            console.log('Richiesta eliminata:', requestId);
+        }
+    } catch (error) {
+        console.error('Errore debug:', error);
+    }
+}
 // Renderizza richieste nella tabella
 function renderRequests(docs, isAdmin) {
     const richiesteBody = elements.richiesteBody;
@@ -604,15 +621,22 @@ function createRequestRow(requestId, data, isAdmin) {
 }
 
 // Aggiorna stato richiesta
+// SOSTITUISCI le funzioni updateRequestStatus e deleteRequest con queste versioni:
+
+// Aggiorna stato richiesta
+// Aggiungi temporaneamente questo console.log per debug
 async function updateRequestStatus(requestId, newStatus) {
     try {
+        console.log('Aggiornamento richiesta:', requestId, '->', newStatus);
+        
         await db.collection('richieste').doc(requestId).update({
             stato: newStatus,
             updatedAt: firebase.firestore.FieldValue.serverTimestamp()
         });
         
+        console.log('Richiesta aggiornata, ricaricando...');
         showFeedback('Successo', 'Stato aggiornato con successo!');
-        await loadRequests(appState.currentUser, true);
+        await loadRequests(appState.currentUser, true, true);
         
     } catch (error) {
         console.error("Errore durante l'aggiornamento:", error);
@@ -620,12 +644,12 @@ async function updateRequestStatus(requestId, newStatus) {
     }
 }
 
-// Elimina richiesta
 async function deleteRequest(requestId) {
     try {
         await db.collection('richieste').doc(requestId).delete();
+        
         showFeedback('Successo', 'Richiesta eliminata con successo!');
-        await loadRequests(appState.currentUser, true);
+        await loadRequests(appState.currentUser, true, true); // forceRefresh = true
         
     } catch (error) {
         console.error("Errore durante l'eliminazione:", error);
@@ -901,6 +925,23 @@ async function handleExportPDF() {
 }
 
 // Gestione registrazione dipendente
+async function verifyUserDocument(userId) {
+    try {
+        const userDoc = await db.collection('users').doc(userId).get();
+        if (userDoc.exists) {
+            console.log('🔍 Verifica documento utente:', userDoc.data());
+            return userDoc.data();
+        } else {
+            console.log('❌ Documento utente non trovato');
+            return null;
+        }
+    } catch (error) {
+        console.error('Errore verifica documento:', error);
+        return null;
+    }
+}
+
+// MODIFICA la funzione handleEmployeeRegistration per includere la verifica:
 async function handleEmployeeRegistration() {
     const employeeName = prompt("Nome completo dipendente:");
     if (!employeeName?.trim()) {
@@ -918,6 +959,23 @@ async function handleEmployeeRegistration() {
         setLoadingState(elements.registerEmployeeBtn, true);
         
         const result = await registerEmployee(employeeName, employeeEmail);
+        
+        // VERIFICA che il documento sia stato creato correttamente
+        console.log('🔍 Verifica finale creazione documento...');
+        // Qui potresti dover aspettare un momento per la propagazione dei dati
+        setTimeout(async () => {
+            const usersSnapshot = await db.collection('users')
+                .where('email', '==', employeeEmail)
+                .get();
+            
+            if (!usersSnapshot.empty) {
+                const userDoc = usersSnapshot.docs[0];
+                console.log('✅ Documento verificato:', userDoc.data());
+            } else {
+                console.log('❌ Documento non trovato dopo creazione');
+            }
+        }, 1000);
+        
         showFeedback('Successo', result.message);
         
         // Ricarica lista se visibile
@@ -936,23 +994,46 @@ async function handleEmployeeRegistration() {
 // Registra dipendente
 async function registerEmployee(employeeName, employeeEmail, tempPassword = "Union14.it") {
     try {
-        const userCredential = await auth.createUserWithEmailAndPassword(employeeEmail, tempPassword);
-        await userCredential.user.updateProfile({ displayName: employeeName });
+        console.log('👤 Registrazione nuovo dipendente:', employeeName, employeeEmail);
         
-        await db.collection('users').doc(userCredential.user.uid).set({
+        // 1. Crea l'utente in Firebase Auth
+        const userCredential = await auth.createUserWithEmailAndPassword(employeeEmail, tempPassword);
+        console.log('✅ Utente Auth creato:', userCredential.user.uid);
+        
+        // 2. Aggiorna il profilo con il nome
+        await userCredential.user.updateProfile({
+            displayName: employeeName
+        });
+        console.log('✅ Profilo aggiornato');
+        
+        // 3. CREA IL DOCUMENTO IN FIRESTORE CON RUOLO ESPLICITO
+        const userData = {
             name: employeeName,
             email: employeeEmail,
-            role: 'dipendente',
+            role: 'dipendente', // 👈 RUOLO ESPLICITAMENTE IMPOSTATO
             temporaryPassword: true,
             createdAt: firebase.firestore.FieldValue.serverTimestamp(),
             updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-        });
+        };
         
-        return { success: true, message: `Dipendente registrato con successo!` };
+        console.log('📝 Dati utente da salvare:', userData);
+        
+        await db.collection('users').doc(userCredential.user.uid).set(userData);
+        console.log('✅ Documento Firestore creato');
+        
+        return { 
+            success: true, 
+            message: `Dipendente "${employeeName}" registrato con successo! Email: ${employeeEmail}, Password temporanea: ${tempPassword}` 
+        };
+        
     } catch (error) {
+        console.error("❌ Errore registrazione dipendente:", error);
+        
+        // Rollback: elimina l'utente se la creazione fallisce
         if (auth.currentUser) {
             try {
                 await auth.currentUser.delete();
+                console.log('🔄 Rollback: utente Auth eliminato');
             } catch (deleteError) {
                 console.error("Errore durante il rollback:", deleteError);
             }
@@ -960,6 +1041,24 @@ async function registerEmployee(employeeName, employeeEmail, tempPassword = "Uni
         throw error;
     }
 }
+
+// AGGIUNGI anche questa funzione di verifica per debug:
+async function verifyUserDocument(userId) {
+    try {
+        const userDoc = await db.collection('users').doc(userId).get();
+        if (userDoc.exists) {
+            console.log('🔍 Verifica documento utente:', userDoc.data());
+            return userDoc.data();
+        } else {
+            console.log('❌ Documento utente non trovato');
+            return null;
+        }
+    } catch (error) {
+        console.error('Errore verifica documento:', error);
+        return null;
+    }
+}
+
 
 // Mostra/nascondi lista dipendenti
 async function toggleEmployeesList() {

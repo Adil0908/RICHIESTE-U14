@@ -6,27 +6,36 @@
     <title>Gestione Richieste - Union14</title>
     <meta name="description" content="Sistema di gestione richieste ferie, permessi e malattia">
     
+    <!-- Security Headers -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://www.gstatic.com https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline'; connect-src 'self' https://*.firebaseio.com https://*.googleapis.com; img-src 'self' data: https:; font-src 'self' data:;">
+    
     <!-- Preconnessioni per performance -->
     <link rel="preconnect" href="https://www.gstatic.com">
     <link rel="preconnect" href="https://cdnjs.cloudflare.com">
+    <link rel="preconnect" href="https://firestore.googleapis.com">
     
-    <!-- Firebase SDKs -->
+    <!-- Firebase SDKs - Versioni allineate -->
     <script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-firestore-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-messaging.js"></script>
     
     <!-- PDF Libraries -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
     
-    <link rel="stylesheet" href="stayles.css">
+    <!-- SheetJS per export Excel -->
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
+    
+    <link rel="stylesheet" href="styles.css">
 </head>
 <body>
     <!-- Screen Reader Only -->
     <div class="sr-only" aria-live="polite" aria-atomic="true">
         <span id="srAnnouncement"></span>
     </div>
+
+    <!-- Toast Container per notifiche -->
+    <div id="toast-container" class="toast-container"></div>
 
     <!-- Modals -->
     <dialog id="confirmationDialog" class="modal">
@@ -67,7 +76,7 @@
                     <div class="form-group">
                         <label for="email" class="form-label required">Email</label>
                         <input type="email" id="email" class="form-control" required 
-                               aria-required="true" autocomplete="email"
+                               aria-required="true" autocomplete="username"
                                placeholder="nome@esempio.com">
                     </div>
                     
@@ -165,8 +174,11 @@
                             Registrazione...
                         </span>
                     </button>
-                    <button id="exportPDF" class="btn btn-info" onclick="exportToPDF()">
+                    <button id="exportPDF" class="btn btn-info">
                         Esporta in PDF
+                    </button>
+                    <button id="exportExcel" class="btn btn-success">
+                        Esporta in Excel
                     </button>
                 </div>
 
@@ -353,7 +365,8 @@
                             <div class="form-group">
                                 <label for="ferieDataInizio" class="form-label required">Data Inizio</label>
                                 <input type="date" id="ferieDataInizio" class="form-control" required
-                                       aria-required="true" aria-describedby="ferieDataInizioHelp">
+                                       aria-required="true" aria-describedby="ferieDataInizioHelp"
+                                       min="" id="ferieDataInizio">
                                 <small id="ferieDataInizioHelp" class="form-help">
                                     Data di inizio ferie
                                 </small>
@@ -374,7 +387,7 @@
                             <input type="number" id="ferieGiorni" class="form-control" min="1" required
                                    readonly aria-describedby="ferieGiorniHelp">
                             <small id="ferieGiorniHelp" class="form-help">
-                                Calcolo automatico basato sulle date selezionate
+                                Calcolo automatico basato sulle date selezionate (esclude weekend e festività)
                             </small>
                         </div>
 
@@ -511,4 +524,3 @@
     <script src="script.js"></script>
 </body>
 </html>
-

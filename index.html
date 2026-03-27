@@ -2,29 +2,37 @@
 <html lang="it">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
     <title>Gestione Richieste - Union14</title>
     <meta name="description" content="Sistema di gestione richieste ferie, permessi e malattia">
     
-    <!-- Security Headers -->
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://www.gstatic.com https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline'; connect-src 'self' https://*.firebaseio.com https://*.googleapis.com; img-src 'self' data: https:; font-src 'self' data:;">
+    <!-- Security Headers - Aggiornato per mobile -->
+    <meta http-equiv="Content-Security-Policy" content="
+        default-src 'self';
+        script-src 'self' 'unsafe-inline' https://www.gstatic.com https://cdnjs.cloudflare.com https://cdn.sheetjs.com;
+        style-src 'self' 'unsafe-inline';
+        connect-src 'self' https://*.firebaseio.com https://*.googleapis.com https://*.firebase.google.com;
+        img-src 'self' data: https:;
+        font-src 'self' data:;
+        frame-src 'self' https://*.firebaseapp.com;
+    ">
     
     <!-- Preconnessioni per performance -->
     <link rel="preconnect" href="https://www.gstatic.com">
     <link rel="preconnect" href="https://cdnjs.cloudflare.com">
     <link rel="preconnect" href="https://firestore.googleapis.com">
     
-    <!-- Firebase SDKs - Versioni allineate -->
+    <!-- Firebase SDKs -->
     <script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-firestore-compat.js"></script>
     
     <!-- PDF Libraries -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" crossorigin="anonymous"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js" crossorigin="anonymous"></script>
     
     <!-- SheetJS per export Excel -->
-    <script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js" crossorigin="anonymous"></script>
     
     <link rel="stylesheet" href="styles.css">
 </head>
@@ -69,7 +77,7 @@
                     <p>Gestione richieste ferie, permessi e malattia</p>
                 </header>
 
-                <!-- Login Form -->
+                <!-- Login Form - Versione migliorata per mobile -->
                 <form id="loginForm" role="form" aria-labelledby="loginHeading" class="auth-form">
                     <h2 id="loginHeading" class="sr-only">Modulo di accesso</h2>
                     
@@ -77,14 +85,28 @@
                         <label for="email" class="form-label required">Email</label>
                         <input type="email" id="email" class="form-control" required 
                                aria-required="true" autocomplete="username"
-                               placeholder="nome@esempio.com">
+                               placeholder="nome@esempio.com"
+                               inputmode="email"
+                               autocapitalize="none"
+                               autocorrect="off"
+                               spellcheck="false">
+                        <small class="form-help">Inserisci l'email usata per la registrazione</small>
                     </div>
                     
-                    <div class="form-group">
+                    <div class="form-group password-group">
                         <label for="password" class="form-label required">Password</label>
-                        <input type="password" id="password" class="form-control" required 
-                               aria-required="true" autocomplete="current-password"
-                               placeholder="Inserisci la tua password">
+                        <div class="password-input-wrapper">
+                            <input type="password" id="password" class="form-control" required 
+                                   aria-required="true" autocomplete="current-password"
+                                   placeholder="Inserisci la tua password"
+                                   inputmode="text"
+                                   autocapitalize="none"
+                                   autocorrect="off">
+                            <button type="button" id="togglePassword" class="btn-toggle-password" aria-label="Mostra password">
+                                👁️
+                            </button>
+                        </div>
+                        <small class="form-help">La password è case-sensitive (distingue tra maiuscole e minuscole)</small>
                     </div>
                     
                     <button type="submit" class="btn btn-primary btn-block" aria-label="Accedi al sistema">
@@ -101,7 +123,7 @@
                     </div>
                 </form>
 
-                <!-- Register Form -->
+                <!-- Register Form - Versione migliorata per mobile -->
                 <form id="registerForm" style="display:none;" role="form" aria-labelledby="registerHeading" class="auth-form">
                     <h2 id="registerHeading" class="sr-only">Modulo di registrazione</h2>
                     
@@ -110,22 +132,37 @@
                         <input type="text" id="regName" class="form-control" required
                                aria-required="true" autocomplete="name"
                                placeholder="Nome e Cognome"
-                               pattern="[A-Za-z\s]{2,}">
+                               pattern="[A-Za-z\s]{2,}"
+                               inputmode="text"
+                               autocapitalize="words"
+                               autocorrect="off">
                     </div>
                     
                     <div class="form-group">
                         <label for="regEmail" class="form-label required">Email</label>
                         <input type="email" id="regEmail" class="form-control" required
                                aria-required="true" autocomplete="email"
-                               placeholder="nome@esempio.com">
+                               placeholder="nome@esempio.com"
+                               inputmode="email"
+                               autocapitalize="none"
+                               autocorrect="off"
+                               spellcheck="false">
                     </div>
                     
-                    <div class="form-group">
+                    <div class="form-group password-group">
                         <label for="regPassword" class="form-label required">Password</label>
-                        <input type="password" id="regPassword" class="form-control" 
-                               minlength="6" required aria-required="true"
-                               placeholder="Minimo 6 caratteri"
-                               autocomplete="new-password">
+                        <div class="password-input-wrapper">
+                            <input type="password" id="regPassword" class="form-control" 
+                                   minlength="6" required aria-required="true"
+                                   placeholder="Minimo 6 caratteri"
+                                   autocomplete="new-password"
+                                   inputmode="text"
+                                   autocapitalize="none"
+                                   autocorrect="off">
+                            <button type="button" id="toggleRegPassword" class="btn-toggle-password" aria-label="Mostra password">
+                                👁️
+                            </button>
+                        </div>
                         <small class="form-help">La password deve essere di almeno 6 caratteri</small>
                     </div>
                     
@@ -149,11 +186,27 @@
 
         <!-- Main Application Container -->
         <div id="mainContainer" class="main-app" style="display:none;" aria-live="polite">
-            <!-- Header -->
+            <!-- Header con campana notifiche -->
             <header class="app-header">
                 <div class="header-content">
                     <h1>Gestione Richieste</h1>
                     <div class="user-menu">
+                        <!-- Notification Bell per Admin -->
+                        <div id="notificationBell" class="notification-bell" style="display: none;">
+                            <button id="bellButton" class="btn-notification" aria-label="Notifiche">
+                                <span class="bell-icon">🔔</span>
+                                <span id="notificationBadge" class="notification-badge" style="display: none;">0</span>
+                            </button>
+                            <div id="notificationPanel" class="notification-panel" style="display: none;">
+                                <div class="notification-header">
+                                    <h4>Notifiche</h4>
+                                    <button id="markAllRead" class="btn-text">Segna tutte come lette</button>
+                                </div>
+                                <div id="notificationList" class="notification-list">
+                                    <div class="notification-empty">Nessuna nuova notifica</div>
+                                </div>
+                            </div>
+                        </div>
                         <span id="loggedInUser" class="user-info"></span>
                         <button id="logoutBtn" class="btn btn-outline logout-btn" aria-label="Esci dal sistema">
                             Esci
@@ -187,9 +240,7 @@
                     <h3>Registro Dipendenti</h3>
                     <div class="admin-actions">
                         <button id="showEmployeesBtn" class="btn btn-primary">
-                            <span class="btn-text" data-show="Visualizza Dipendenti" data-hide="Nascondi Dipendenti">
-                                Visualizza Dipendenti
-                            </span>
+                            <span class="btn-text">Visualizza Dipendenti</span>
                         </button>
                     </div>
                     
@@ -277,12 +328,8 @@
                         </div>
                         
                         <div class="filter-actions">
-                            <button id="applyFilters" class="btn btn-primary" aria-label="Applica i filtri selezionati">
-                                Applica Filtri
-                            </button>
-                            <button id="resetFilters" class="btn btn-secondary" aria-label="Reimposta tutti i filtri">
-                                Reset
-                            </button>
+                            <button id="applyFilters" class="btn btn-primary">Applica Filtri</button>
+                            <button id="resetFilters" class="btn btn-secondary">Reset</button>
                         </div>
                     </div>
                 </div>
@@ -317,13 +364,9 @@
                 
                 <!-- Pagination -->
                 <div class="pagination" id="paginationControls" style="display: none;">
-                    <button id="prevPage" class="btn btn-pagination" disabled aria-label="Pagina precedente">
-                        Precedente
-                    </button>
-                    <span id="pageInfo" class="page-info" aria-live="polite">Pagina 1 di 1</span>
-                    <button id="nextPage" class="btn btn-pagination" disabled aria-label="Pagina successiva">
-                        Successiva
-                    </button>
+                    <button id="prevPage" class="btn btn-pagination" disabled>Precedente</button>
+                    <span id="pageInfo" class="page-info">Pagina 1 di 1</span>
+                    <button id="nextPage" class="btn btn-pagination" disabled>Successiva</button>
                 </div>
             </section>
 
@@ -348,47 +391,34 @@
 
                 <!-- Ferie Form -->
                 <div id="ferie" class="tab-content active" role="tabpanel" aria-labelledby="ferie-tab-btn" tabindex="0">
-                    <form id="ferieForm" class="request-form" novalidate aria-labelledby="ferieFormHeading">
+                    <form id="ferieForm" class="request-form" novalidate>
                         <h3 id="ferieFormHeading">Richiesta Ferie</h3>
                         
                         <div class="form-group">
                             <label for="ferieNome" class="form-label required">Nome e Cognome</label>
                             <input type="text" id="ferieNome" class="form-control" required 
-                                   aria-required="true" readonly
-                                   aria-describedby="ferieNomeHelp">
-                            <small id="ferieNomeHelp" class="form-help">
-                                Nome automaticamente impostato dal tuo profilo
-                            </small>
+                                   aria-required="true" readonly>
+                            <small class="form-help">Nome automaticamente impostato dal tuo profilo</small>
                         </div>
 
                         <div class="form-row">
                             <div class="form-group">
                                 <label for="ferieDataInizio" class="form-label required">Data Inizio</label>
-                                <input type="date" id="ferieDataInizio" class="form-control" required
-                                       aria-required="true" aria-describedby="ferieDataInizioHelp"
-                                       min="" id="ferieDataInizio">
-                                <small id="ferieDataInizioHelp" class="form-help">
-                                    Data di inizio ferie
-                                </small>
+                                <input type="date" id="ferieDataInizio" class="form-control" required aria-required="true">
+                                <small class="form-help">Data di inizio ferie</small>
                             </div>
 
                             <div class="form-group">
                                 <label for="ferieDataFine" class="form-label required">Data Fine</label>
-                                <input type="date" id="ferieDataFine" class="form-control" required
-                                       aria-required="true" aria-describedby="ferieDataFineHelp">
-                                <small id="ferieDataFineHelp" class="form-help">
-                                    Data di fine ferie
-                                </small>
+                                <input type="date" id="ferieDataFine" class="form-control" required aria-required="true">
+                                <small class="form-help">Data di fine ferie</small>
                             </div>
                         </div>
 
                         <div class="form-group">
                             <label for="ferieGiorni" class="form-label required">Giorni richiesti</label>
-                            <input type="number" id="ferieGiorni" class="form-control" min="1" required
-                                   readonly aria-describedby="ferieGiorniHelp">
-                            <small id="ferieGiorniHelp" class="form-help">
-                                Calcolo automatico basato sulle date selezionate (esclude weekend e festività)
-                            </small>
+                            <input type="number" id="ferieGiorni" class="form-control" min="1" required readonly>
+                            <small class="form-help">Calcolo automatico basato sulle date selezionate (esclude weekend e festività)</small>
                         </div>
 
                         <div class="form-actions">
@@ -406,44 +436,36 @@
 
                 <!-- Malattia Form -->
                 <div id="malattia" class="tab-content" role="tabpanel" aria-labelledby="malattia-tab-btn" tabindex="0">
-                    <form id="malattiaForm" class="request-form" novalidate aria-labelledby="malattiaFormHeading">
+                    <form id="malattiaForm" class="request-form" novalidate>
                         <h3 id="malattiaFormHeading">Richiesta Malattia</h3>
                         
                         <div class="form-group">
                             <label for="malattiaNome" class="form-label required">Nome e Cognome</label>
-                            <input type="text" id="malattiaNome" class="form-control" required 
-                                   aria-required="true" readonly
-                                   aria-describedby="malattiaNomeHelp">
-                            <small id="malattiaNomeHelp" class="form-help">
-                                Nome automaticamente impostato dal tuo profilo
-                            </small>
+                            <input type="text" id="malattiaNome" class="form-control" required aria-required="true" readonly>
+                            <small class="form-help">Nome automaticamente impostato dal tuo profilo</small>
                         </div>
 
                         <div class="form-row">
                             <div class="form-group">
                                 <label for="malattiaDataInizio" class="form-label required">Data Inizio</label>
-                                <input type="date" id="malattiaDataInizio" class="form-control" required
-                                       aria-required="true">
+                                <input type="date" id="malattiaDataInizio" class="form-control" required>
                             </div>
 
                             <div class="form-group">
                                 <label for="malattiaDataFine" class="form-label required">Data Fine</label>
-                                <input type="date" id="malattiaDataFine" class="form-control" required
-                                       aria-required="true">
+                                <input type="date" id="malattiaDataFine" class="form-control" required>
                             </div>
                         </div>
 
                         <div class="form-row">
                             <div class="form-group">
                                 <label for="malattiaNumeroCertificato" class="form-label required">Numero Certificato</label>
-                                <input type="text" id="malattiaNumeroCertificato" class="form-control" required
-                                       aria-required="true" placeholder="Inserisci numero certificato">
+                                <input type="text" id="malattiaNumeroCertificato" class="form-control" required placeholder="Inserisci numero certificato">
                             </div>
 
                             <div class="form-group">
                                 <label for="malattiaDataCertificato" class="form-label required">Data Certificato</label>
-                                <input type="date" id="malattiaDataCertificato" class="form-control" required
-                                       aria-required="true">
+                                <input type="date" id="malattiaDataCertificato" class="form-control" required>
                             </div>
                         </div>
 
@@ -462,47 +484,37 @@
 
                 <!-- Permessi Form -->
                 <div id="permessi" class="tab-content" role="tabpanel" aria-labelledby="permessi-tab-btn" tabindex="0">
-                    <form id="permessiForm" class="request-form" novalidate aria-labelledby="permessiFormHeading">
+                    <form id="permessiForm" class="request-form" novalidate>
                         <h3 id="permessiFormHeading">Richiesta Permessi</h3>
                         
                         <div class="form-group">
                             <label for="permessiNome" class="form-label required">Nome e Cognome</label>
-                            <input type="text" id="permessiNome" class="form-control" required 
-                                   aria-required="true" readonly
-                                   aria-describedby="permessiNomeHelp">
-                            <small id="permessiNomeHelp" class="form-help">
-                                Nome automaticamente impostato dal tuo profilo
-                            </small>
+                            <input type="text" id="permessiNome" class="form-control" required aria-required="true" readonly>
+                            <small class="form-help">Nome automaticamente impostato dal tuo profilo</small>
                         </div>
 
                         <div class="form-group">
                             <label for="permessiData" class="form-label required">Data Permesso</label>
-                            <input type="date" id="permessiData" class="form-control" required
-                                   aria-required="true">
+                            <input type="date" id="permessiData" class="form-control" required>
                         </div>
 
                         <div class="form-row">
                             <div class="form-group">
                                 <label for="permessiOraInizio" class="form-label required">Ora Inizio</label>
-                                <input type="time" id="permessiOraInizio" class="form-control" required
-                                       aria-required="true">
+                                <input type="time" id="permessiOraInizio" class="form-control" required>
                             </div>
 
                             <div class="form-group">
                                 <label for="permessiOraFine" class="form-label required">Ora Fine</label>
-                                <input type="time" id="permessiOraFine" class="form-control" required
-                                       aria-required="true">
+                                <input type="time" id="permessiOraFine" class="form-control" required>
                             </div>
                         </div>
 
                         <div class="form-group">
                             <label for="permessiMotivazione" class="form-label">Motivazione</label>
                             <textarea id="permessiMotivazione" class="form-control" rows="3"
-                                      placeholder="Breve descrizione della motivazione (opzionale)"
-                                      aria-describedby="permessiMotivazioneHelp"></textarea>
-                            <small id="permessiMotivazioneHelp" class="form-help">
-                                Campo opzionale per specificare la motivazione del permesso
-                            </small>
+                                      placeholder="Breve descrizione della motivazione (opzionale)"></textarea>
+                            <small class="form-help">Campo opzionale per specificare la motivazione del permesso</small>
                         </div>
 
                         <div class="form-actions">

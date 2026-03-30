@@ -15,7 +15,13 @@
     <script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-firestore-compat.js"></script>
-    
+    <!-- Aggiungi nel <head> del tuo HTML -->
+<script type="text/javascript" src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
+<script type="text/javascript">
+    (function(){
+        emailjs.init("YOUR_PUBLIC_KEY"); // Inserisci la tua Public Key
+    })();
+</script>
     <!-- PDF Libraries -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" crossorigin="anonymous"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js" crossorigin="anonymous"></script>
@@ -127,27 +133,32 @@
                 <div class="admin-actions">
                     <button id="showEmployeesBtn" class="btn btn-primary">Visualizza Dipendenti</button>
                 </div>
-                
-                <div id="employeesList" style="display: none;" class="table-section">
-                    <div class="table-container">
-                        <table class="requests-table">
-                            <thead>
-                                <tr>
-                                    <th>Nome</th>
-                                    <th>Email</th>
-                                    <th>Ruolo</th>
-                                    <th>Data Registrazione</th>
-                                    <th>Stato Password</th>
-                                    <th>Azioni</th>
-                                </tr>
-                            </thead>
-                            <tbody id="employeesBody">
-                                <tr><td colspan="6" class="text-center">Caricamento...</td></tr>
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
+    
+               <div id="employeesList" style="display: none;" class="table-section">
+    <div class="table-container">
+        <table class="requests-table">
+            <thead>
+                <tr>
+                    <th>Nome</th>
+                    <th>Email</th>
+                    <th>Ruolo</th>
+                    <th>Data Registrazione</th>
+                    <th>Stato Password</th>
+                    <th>Azioni</th>
+                </tr>
+            </thead>
+            <tbody id="employeesBody">
+                <tr><td colspan="6" class="text-center">Caricamento...</td></tr>
+            </tbody>
+        </table>
+    </div>
+    <!-- Paginazione dipendenti -->
+    <div class="pagination" id="employeesPagination" style="display: none;">
+        <button id="prevEmployeesPage" class="btn btn-pagination" disabled>Precedente</button>
+        <span id="employeesPageInfo" class="page-info">Pagina 1 di 1</span>
+        <button id="nextEmployeesPage" class="btn btn-pagination" disabled>Successiva</button>
+    </div>
+</div>
 
             <div id="adminFilters" class="filters-section">
                 <h3>Filtri Ricerca</h3>
@@ -230,7 +241,20 @@
                 <button id="nextPage" class="btn btn-pagination" disabled>Successiva</button>
             </div>
         </section>
-
+<section id="passwordSection" class="password-section" style="display: none;">
+    <div class="password-change-card">
+        <div class="password-card-content">
+            <div class="password-icon">🔐</div>
+            <div class="password-text">
+                <h3>Password Temporanea</h3>
+                <p>La tua password è temporanea. Per maggiore sicurezza, impostane una nuova.</p>
+            </div>
+            <button id="changePasswordBtn" class="btn btn-warning">
+                Cambia Password
+            </button>
+        </div>
+    </div>
+</section>
         <!-- Request Forms -->
         <section id="requestForms" class="forms-section">
             <div class="tabs" role="tablist">
@@ -334,6 +358,32 @@
                 </form>
             </div>
         </section>
+        <!-- Modale per cambio password (rimane uguale) -->
+<dialog id="changePasswordDialog" class="modal">
+    <div class="modal-content">
+        <h3>Cambia Password</h3>
+        <form id="changePasswordForm">
+            <div class="form-group">
+                <label for="currentPassword">Password Attuale</label>
+                <input type="password" id="currentPassword" class="form-control" required autocomplete="current-password">
+            </div>
+            <div class="form-group">
+                <label for="newPassword">Nuova Password</label>
+                <input type="password" id="newPassword" class="form-control" required minlength="6">
+                <small class="form-help">Minimo 6 caratteri. Usa una combinazione di lettere e numeri.</small>
+            </div>
+            <div class="form-group">
+                <label for="confirmPassword">Conferma Nuova Password</label>
+                <input type="password" id="confirmPassword" class="form-control" required>
+            </div>
+            <div class="password-strength" id="passwordStrength"></div>
+            <div class="modal-actions">
+                <button type="submit" class="btn btn-primary">Cambia Password</button>
+                <button type="button" id="closeChangePassword" class="btn btn-secondary">Annulla</button>
+            </div>
+        </form>
+    </div>
+</dialog>
     </div>
 
     <script src="script.js"></script>

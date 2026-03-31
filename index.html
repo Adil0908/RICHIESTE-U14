@@ -5,55 +5,58 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
     <title>Gestione Richieste - Union14</title>
     <meta name="description" content="Sistema di gestione richieste ferie, permessi e malattia">
+    <meta name="theme-color" content="#1976d2">
     
     <!-- Preconnessioni -->
     <link rel="preconnect" href="https://www.gstatic.com">
     <link rel="preconnect" href="https://cdnjs.cloudflare.com">
     <link rel="preconnect" href="https://firestore.googleapis.com">
+    <link rel="dns-prefetch" href="https://www.gstatic.com">
+    <link rel="dns-prefetch" href="https://cdnjs.cloudflare.com">
     
-    <!-- Firebase SDKs -->
-    <script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-auth-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-firestore-compat.js"></script>
-    <!-- Aggiungi nel <head> del tuo HTML -->
-<script type="text/javascript" src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
-<script type="text/javascript">
-    (function(){
-        emailjs.init("YOUR_PUBLIC_KEY"); // Inserisci la tua Public Key
-    })();
-</script>
-    <!-- PDF Libraries -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" crossorigin="anonymous"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js" crossorigin="anonymous"></script>
-    <script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js" crossorigin="anonymous"></script>
+    <!-- Firebase SDKs con caricamento differito -->
+    <script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-app-compat.js" defer></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-auth-compat.js" defer></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-firestore-compat.js" defer></script>
+    
+    <!-- EmailJS - Configurazione sicura -->
+    <script type="text/javascript" src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js" defer></script>
+    
+    <!-- PDF Libraries con caricamento differito -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" defer crossorigin="anonymous"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js" defer crossorigin="anonymous"></script>
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js" defer crossorigin="anonymous"></script>
     
     <link rel="stylesheet" href="styles.css">
+    
+    <!-- Preload critico -->
+    <link rel="preload" href="styles.css" as="style">
 </head>
 <body>
-    <div class="sr-only" aria-live="polite" aria-atomic="true">
+    <div class="sr-only" aria-live="polite" aria-atomic="true" role="status">
         <span id="srAnnouncement"></span>
     </div>
 
-    <div id="toast-container" class="toast-container"></div>
+    <div id="toast-container" class="toast-container" role="alert" aria-live="assertive"></div>
 
-    <!-- Modals -->
-    <dialog id="confirmationDialog" class="modal">
+    <!-- Modals con ARIA migliorato -->
+    <dialog id="confirmationDialog" class="modal" aria-labelledby="confirmationTitle" aria-describedby="confirmationMessage">
         <div class="modal-content">
             <h3 id="confirmationTitle">Conferma Azione</h3>
             <p id="confirmationMessage">Sei sicuro di voler procedere?</p>
             <div class="modal-actions">
-                <button id="confirmAction" class="btn btn-danger">Conferma</button>
+                <button id="confirmAction" class="btn btn-danger" autofocus>Conferma</button>
                 <button id="cancelAction" class="btn btn-secondary">Annulla</button>
             </div>
         </div>
     </dialog>
 
-    <dialog id="feedbackDialog" class="modal">
+    <dialog id="feedbackDialog" class="modal" aria-labelledby="feedbackTitle" aria-describedby="feedbackMessage">
         <div class="modal-content">
             <h3 id="feedbackTitle">Informazione</h3>
             <p id="feedbackMessage"></p>
             <div class="modal-actions">
-                <button id="closeFeedback" class="btn btn-primary">Chiudi</button>
+                <button id="closeFeedback" class="btn btn-primary" autofocus>Chiudi</button>
             </div>
         </div>
     </dialog>
@@ -62,30 +65,37 @@
     <div id="loginContainer" class="login-container">
         <div class="login-box">
             <header class="login-header">
-                <h1>Gestione Richieste</h1>
+                <h1>Gestione Richieste Union14</h1>
                 <p>Accedi con le tue credenziali</p>
             </header>
 
-            <form id="loginForm" class="auth-form">
+            <form id="loginForm" class="auth-form" novalidate>
                 <div class="form-group">
                     <label for="email" class="form-label required">Email</label>
-                    <input type="email" id="email" class="form-control" required 
+                    <input type="email" id="email" name="email" class="form-control" required 
                            autocomplete="email" placeholder="nome@esempio.com"
-                           inputmode="email" autocapitalize="none" autocorrect="off">
+                           inputmode="email" autocapitalize="none" autocorrect="off"
+                           aria-required="true" aria-describedby="email-error">
+                    <div id="email-error" class="error-message" aria-live="polite"></div>
                 </div>
                 
                 <div class="form-group password-group">
                     <label for="password" class="form-label required">Password</label>
                     <div class="password-input-wrapper">
-                        <input type="password" id="password" class="form-control" required 
-                               autocomplete="current-password" placeholder="Inserisci la password">
-                        <button type="button" id="togglePassword" class="btn-toggle-password">👁️</button>
+                        <input type="password" id="password" name="password" class="form-control" required 
+                               autocomplete="current-password" placeholder="Inserisci la password"
+                               aria-required="true" aria-describedby="password-error">
+                        <button type="button" id="togglePassword" class="btn-toggle-password" 
+                                aria-label="Mostra/Nascondi password" aria-pressed="false">
+                            👁️
+                        </button>
                     </div>
+                    <div id="password-error" class="error-message" aria-live="polite"></div>
                 </div>
                 
-                <button type="submit" class="btn btn-primary btn-block">
+                <button type="submit" class="btn btn-primary btn-block" aria-label="Accedi al sistema">
                     <span class="btn-text">Accedi</span>
-                    <span class="btn-loading" style="display: none;">
+                    <span class="btn-loading" style="display: none;" aria-hidden="true">
                         <span class="loading-spinner"></span>
                         Accesso in corso...
                     </span>
@@ -95,7 +105,7 @@
                     <a href="#" id="resetPasswordLink" class="auth-link">Password dimenticata?</a>
                 </div>
                 
-                <div id="loginError" class="error-message"></div>
+                <div id="loginError" class="error-message" role="alert" aria-live="assertive"></div>
             </form>
         </div>
     </div>
@@ -104,130 +114,132 @@
     <div id="mainContainer" class="main-app" style="display:none;">
         <header class="app-header">
             <div class="header-content">
-                <h1>Gestione Richieste</h1>
+                <h1>Gestione Richieste Union14</h1>
                 <div class="user-menu">
-                    <span id="loggedInUser" class="user-info"></span>
-                    <button id="logoutBtn" class="btn btn-outline logout-btn">Esci</button>
+                    <span id="loggedInUser" class="user-info" aria-live="polite"></span>
+                    <button id="logoutBtn" class="btn btn-outline logout-btn" aria-label="Esci dall'applicazione">Esci</button>
                 </div>
             </div>
         </header>
 
         <!-- Admin Controls -->
-        <section id="adminControls" style="display: none;" class="admin-section">
-            <h2>Pannello Amministratore</h2>
+        <section id="adminControls" style="display: none;" class="admin-section" aria-labelledby="admin-title">
+            <h2 id="admin-title">Pannello Amministratore</h2>
             
-            <div class="admin-actions">
-                <button id="registerEmployeeBtn" class="btn btn-success">
+            <div class="admin-actions" role="group" aria-label="Azioni amministrative">
+                <button id="registerEmployeeBtn" class="btn btn-success" aria-label="Registra nuovo dipendente">
                     <span class="btn-text">Registra Dipendente</span>
-                    <span class="btn-loading" style="display: none;">
+                    <span class="btn-loading" style="display: none;" aria-hidden="true">
                         <span class="loading-spinner"></span>
                         Registrazione...
                     </span>
                 </button>
-                <button id="exportPDF" class="btn btn-info">Esporta in PDF</button>
-                <button id="exportExcel" class="btn btn-success">Esporta in Excel</button>
+                <button id="exportPDF" class="btn btn-info" aria-label="Esporta richieste in PDF">Esporta in PDF</button>
+                <button id="exportExcel" class="btn btn-success" aria-label="Esporta richieste in Excel">Esporta in Excel</button>
             </div>
 
             <div class="admin-subsection">
                 <h3>Registro Dipendenti</h3>
                 <div class="admin-actions">
-                    <button id="showEmployeesBtn" class="btn btn-primary">Visualizza Dipendenti</button>
+                    <button id="showEmployeesBtn" class="btn btn-primary" aria-expanded="false" aria-controls="employeesList">
+                        Visualizza Dipendenti
+                    </button>
                 </div>
     
-               <div id="employeesList" style="display: none;" class="table-section">
-    <div class="table-container">
-        <table class="requests-table">
-            <thead>
-                <tr>
-                    <th>Nome</th>
-                    <th>Email</th>
-                    <th>Ruolo</th>
-                    <th>Data Registrazione</th>
-                    <th>Stato Password</th>
-                    <th>Azioni</th>
-                </tr>
-            </thead>
-            <tbody id="employeesBody">
-                <tr><td colspan="6" class="text-center">Caricamento...</td></tr>
-            </tbody>
-        </table>
-    </div>
-    <!-- Paginazione dipendenti -->
-    <div class="pagination" id="employeesPagination" style="display: none;">
-        <button id="prevEmployeesPage" class="btn btn-pagination" disabled>Precedente</button>
-        <span id="employeesPageInfo" class="page-info">Pagina 1 di 1</span>
-        <button id="nextEmployeesPage" class="btn btn-pagination" disabled>Successiva</button>
-    </div>
-</div>
+                <div id="employeesList" style="display: none;" class="table-section" aria-label="Elenco dipendenti">
+                    <div class="table-container" role="region" aria-label="Tabella dipendenti" tabindex="0">
+                        <table class="requests-table">
+                            <thead>
+                                <tr>
+                                    <th scope="col">Nome</th>
+                                    <th scope="col">Email</th>
+                                    <th scope="col">Ruolo</th>
+                                    <th scope="col">Data Registrazione</th>
+                                    <th scope="col">Stato Password</th>
+                                    <th scope="col">Azioni</th>
+                                </tr>
+                            </thead>
+                            <tbody id="employeesBody">
+                                <tr><td colspan="6" class="text-center">Caricamento...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="pagination" id="employeesPagination" style="display: none;" aria-label="Paginazione dipendenti">
+                        <button id="prevEmployeesPage" class="btn btn-pagination" disabled aria-label="Pagina precedente">Precedente</button>
+                        <span id="employeesPageInfo" class="page-info" aria-live="polite">Pagina 1 di 1</span>
+                        <button id="nextEmployeesPage" class="btn btn-pagination" disabled aria-label="Pagina successiva">Successiva</button>
+                    </div>
+                </div>
 
-            <div id="adminFilters" class="filters-section">
-                <h3>Filtri Ricerca</h3>
-                <div class="filter-grid">
-                    <div class="filter-group">
-                        <label for="filterType">Tipo</label>
-                        <select id="filterType" class="form-control">
-                            <option value="">Tutti</option>
-                            <option value="Ferie">Ferie</option>
-                            <option value="Malattia">Malattia</option>
-                            <option value="Permesso">Permesso</option>
-                        </select>
-                    </div>
-                    <div class="filter-group">
-                        <label for="filterEmployee">Dipendente</label>
-                        <input type="text" id="filterEmployee" class="form-control" placeholder="Cerca...">
-                    </div>
-                    <div class="filter-group">
-                        <label for="filterYear">Anno</label>
-                        <input type="number" id="filterYear" class="form-control" placeholder="2025">
-                    </div>
-                    <div class="filter-group">
-                        <label for="filterMonth">Mese</label>
-                        <select id="filterMonth" class="form-control">
-                            <option value="">Tutti</option>
-                            <option value="1">Gennaio</option>
-                            <option value="2">Febbraio</option>
-                            <option value="3">Marzo</option>
-                            <option value="4">Aprile</option>
-                            <option value="5">Maggio</option>
-                            <option value="6">Giugno</option>
-                            <option value="7">Luglio</option>
-                            <option value="8">Agosto</option>
-                            <option value="9">Settembre</option>
-                            <option value="10">Ottobre</option>
-                            <option value="11">Novembre</option>
-                            <option value="12">Dicembre</option>
-                        </select>
-                    </div>
-                    <div class="filter-group">
-                        <label for="filterStatus">Stato</label>
-                        <select id="filterStatus" class="form-control">
-                            <option value="">Tutti</option>
-                            <option value="In attesa">In attesa</option>
-                            <option value="Approvato">Approvato</option>
-                            <option value="Rifiutato">Rifiutato</option>
-                        </select>
-                    </div>
-                    <div class="filter-actions">
-                        <button id="applyFilters" class="btn btn-primary">Applica</button>
-                        <button id="resetFilters" class="btn btn-secondary">Reset</button>
+                <div id="adminFilters" class="filters-section" aria-labelledby="filters-title">
+                    <h3 id="filters-title">Filtri Ricerca</h3>
+                    <div class="filter-grid">
+                        <div class="filter-group">
+                            <label for="filterType">Tipo</label>
+                            <select id="filterType" class="form-control" aria-label="Filtra per tipo richiesta">
+                                <option value="">Tutti</option>
+                                <option value="Ferie">Ferie</option>
+                                <option value="Malattia">Malattia</option>
+                                <option value="Permesso">Permesso</option>
+                            </select>
+                        </div>
+                        <div class="filter-group">
+                            <label for="filterEmployee">Dipendente</label>
+                            <input type="text" id="filterEmployee" class="form-control" placeholder="Cerca..." aria-label="Cerca per nome dipendente">
+                        </div>
+                        <div class="filter-group">
+                            <label for="filterYear">Anno</label>
+                            <input type="number" id="filterYear" class="form-control" placeholder="2025" aria-label="Filtra per anno" min="2020" max="2030">
+                        </div>
+                        <div class="filter-group">
+                            <label for="filterMonth">Mese</label>
+                            <select id="filterMonth" class="form-control" aria-label="Filtra per mese">
+                                <option value="">Tutti</option>
+                                <option value="1">Gennaio</option>
+                                <option value="2">Febbraio</option>
+                                <option value="3">Marzo</option>
+                                <option value="4">Aprile</option>
+                                <option value="5">Maggio</option>
+                                <option value="6">Giugno</option>
+                                <option value="7">Luglio</option>
+                                <option value="8">Agosto</option>
+                                <option value="9">Settembre</option>
+                                <option value="10">Ottobre</option>
+                                <option value="11">Novembre</option>
+                                <option value="12">Dicembre</option>
+                            </select>
+                        </div>
+                        <div class="filter-group">
+                            <label for="filterStatus">Stato</label>
+                            <select id="filterStatus" class="form-control" aria-label="Filtra per stato">
+                                <option value="">Tutti</option>
+                                <option value="In attesa">In attesa</option>
+                                <option value="Approvato">Approvato</option>
+                                <option value="Rifiutato">Rifiutato</option>
+                            </select>
+                        </div>
+                        <div class="filter-actions">
+                            <button id="applyFilters" class="btn btn-primary" aria-label="Applica filtri">Applica</button>
+                            <button id="resetFilters" class="btn btn-secondary" aria-label="Resetta filtri">Reset</button>
+                        </div>
                     </div>
                 </div>
             </div>
         </section>
 
         <!-- Requests Section -->
-        <section id="richiesteInviate" class="requests-section">
-            <h2>Richieste Inviate</h2>
-            <div class="table-responsive">
+        <section id="richiesteInviate" class="requests-section" aria-labelledby="requests-title">
+            <h2 id="requests-title">Richieste Inviate</h2>
+            <div class="table-responsive" role="region" aria-label="Tabella richieste" tabindex="0">
                 <table id="richiesteTable" class="requests-table">
                     <thead>
                         <tr>
-                            <th>Tipo</th>
-                            <th>Nome</th>
-                            <th>Periodo</th>
-                            <th>Dettagli</th>
-                            <th>Stato</th>
-                            <th id="azioniHeader" style="display:none;">Azioni</th>
+                            <th scope="col">Tipo</th>
+                            <th scope="col">Nome</th>
+                            <th scope="col">Periodo</th>
+                            <th scope="col">Dettagli</th>
+                            <th scope="col">Stato</th>
+                            <th id="azioniHeader" scope="col" style="display:none;">Azioni</th>
                         </tr>
                     </thead>
                     <tbody id="richiesteBody">
@@ -235,54 +247,57 @@
                     </tbody>
                 </table>
             </div>
-            <div class="pagination" id="paginationControls" style="display: none;">
-                <button id="prevPage" class="btn btn-pagination" disabled>Precedente</button>
-                <span id="pageInfo" class="page-info">Pagina 1 di 1</span>
-                <button id="nextPage" class="btn btn-pagination" disabled>Successiva</button>
+            <div class="pagination" id="paginationControls" style="display: none;" aria-label="Paginazione richieste">
+                <button id="prevPage" class="btn btn-pagination" disabled aria-label="Pagina precedente">Precedente</button>
+                <span id="pageInfo" class="page-info" aria-live="polite">Pagina 1 di 1</span>
+                <button id="nextPage" class="btn btn-pagination" disabled aria-label="Pagina successiva">Successiva</button>
             </div>
         </section>
-<section id="passwordSection" class="password-section" style="display: none;">
-    <div class="password-change-card">
-        <div class="password-card-content">
-            <div class="password-icon">🔐</div>
-            <div class="password-text">
-                <h3>Password Temporanea</h3>
-                <p>La tua password è temporanea. Per maggiore sicurezza, impostane una nuova.</p>
+
+        <section id="passwordSection" class="password-section" style="display: none;" aria-label="Notifica password temporanea">
+            <div class="password-change-card">
+                <div class="password-card-content">
+                    <div class="password-icon" aria-hidden="true">🔐</div>
+                    <div class="password-text">
+                        <h3>Password Temporanea</h3>
+                        <p>La tua password è temporanea. Per maggiore sicurezza, impostane una nuova.</p>
+                    </div>
+                    <button id="changePasswordBtn" class="btn btn-warning" aria-label="Cambia password temporanea">
+                        Cambia Password
+                    </button>
+                </div>
             </div>
-            <button id="changePasswordBtn" class="btn btn-warning">
-                Cambia Password
-            </button>
-        </div>
-    </div>
-</section>
+        </section>
+
         <!-- Request Forms -->
-        <section id="requestForms" class="forms-section">
-            <div class="tabs" role="tablist">
-                <button class="tab-button active" data-tab="ferie">Ferie</button>
-                <button class="tab-button" data-tab="malattia">Malattia</button>
-                <button class="tab-button" data-tab="permessi">Permessi</button>
+        <section id="requestForms" class="forms-section" aria-labelledby="forms-title">
+            <h2 id="forms-title" class="sr-only">Moduli Richieste</h2>
+            <div class="tabs" role="tablist" aria-label="Tipi di richiesta">
+                <button class="tab-button active" data-tab="ferie" role="tab" aria-selected="true" aria-controls="ferie">Ferie</button>
+                <button class="tab-button" data-tab="malattia" role="tab" aria-selected="false" aria-controls="malattia">Malattia</button>
+                <button class="tab-button" data-tab="permessi" role="tab" aria-selected="false" aria-controls="permessi">Permessi</button>
             </div>
 
-            <div id="ferie" class="tab-content active">
-                <form id="ferieForm" class="request-form">
+            <div id="ferie" class="tab-content active" role="tabpanel" aria-labelledby="ferie-tab">
+                <form id="ferieForm" class="request-form" novalidate>
                     <h3>Richiesta Ferie</h3>
                     <div class="form-group">
-                        <label class="form-label required">Nome e Cognome</label>
-                        <input type="text" id="ferieNome" class="form-control" readonly>
+                        <label for="ferieNome" class="form-label required">Nome e Cognome</label>
+                        <input type="text" id="ferieNome" class="form-control" readonly aria-readonly="true">
                     </div>
                     <div class="form-row">
                         <div class="form-group">
-                            <label class="form-label required">Data Inizio</label>
-                            <input type="date" id="ferieDataInizio" class="form-control" required>
+                            <label for="ferieDataInizio" class="form-label required">Data Inizio</label>
+                            <input type="date" id="ferieDataInizio" class="form-control" required aria-required="true">
                         </div>
                         <div class="form-group">
-                            <label class="form-label required">Data Fine</label>
-                            <input type="date" id="ferieDataFine" class="form-control" required>
+                            <label for="ferieDataFine" class="form-label required">Data Fine</label>
+                            <input type="date" id="ferieDataFine" class="form-control" required aria-required="true">
                         </div>
                     </div>
                     <div class="form-group">
-                        <label class="form-label required">Giorni richiesti</label>
-                        <input type="number" id="ferieGiorni" class="form-control" readonly>
+                        <label for="ferieGiorni" class="form-label required">Giorni richiesti</label>
+                        <input type="number" id="ferieGiorni" class="form-control" readonly aria-readonly="true">
                         <small class="form-help">Calcolo automatico (esclude weekend)</small>
                     </div>
                     <div class="form-actions">
@@ -292,31 +307,31 @@
                 </form>
             </div>
 
-            <div id="malattia" class="tab-content">
-                <form id="malattiaForm" class="request-form">
+            <div id="malattia" class="tab-content" role="tabpanel" aria-labelledby="malattia-tab">
+                <form id="malattiaForm" class="request-form" novalidate>
                     <h3>Richiesta Malattia</h3>
                     <div class="form-group">
-                        <label class="form-label required">Nome e Cognome</label>
-                        <input type="text" id="malattiaNome" class="form-control" readonly>
+                        <label for="malattiaNome" class="form-label required">Nome e Cognome</label>
+                        <input type="text" id="malattiaNome" class="form-control" readonly aria-readonly="true">
                     </div>
                     <div class="form-row">
                         <div class="form-group">
-                            <label class="form-label required">Data Inizio</label>
-                            <input type="date" id="malattiaDataInizio" class="form-control" required>
+                            <label for="malattiaDataInizio" class="form-label required">Data Inizio</label>
+                            <input type="date" id="malattiaDataInizio" class="form-control" required aria-required="true">
                         </div>
                         <div class="form-group">
-                            <label class="form-label required">Data Fine</label>
-                            <input type="date" id="malattiaDataFine" class="form-control" required>
+                            <label for="malattiaDataFine" class="form-label required">Data Fine</label>
+                            <input type="date" id="malattiaDataFine" class="form-control" required aria-required="true">
                         </div>
                     </div>
                     <div class="form-row">
                         <div class="form-group">
-                            <label class="form-label required">Numero Certificato</label>
-                            <input type="text" id="malattiaNumeroCertificato" class="form-control" required>
+                            <label for="malattiaNumeroCertificato" class="form-label required">Numero Certificato</label>
+                            <input type="text" id="malattiaNumeroCertificato" class="form-control" required aria-required="true">
                         </div>
                         <div class="form-group">
-                            <label class="form-label required">Data Certificato</label>
-                            <input type="date" id="malattiaDataCertificato" class="form-control" required>
+                            <label for="malattiaDataCertificato" class="form-label required">Data Certificato</label>
+                            <input type="date" id="malattiaDataCertificato" class="form-control" required aria-required="true">
                         </div>
                     </div>
                     <div class="form-actions">
@@ -326,29 +341,29 @@
                 </form>
             </div>
 
-            <div id="permessi" class="tab-content">
-                <form id="permessiForm" class="request-form">
+            <div id="permessi" class="tab-content" role="tabpanel" aria-labelledby="permessi-tab">
+                <form id="permessiForm" class="request-form" novalidate>
                     <h3>Richiesta Permessi</h3>
                     <div class="form-group">
-                        <label class="form-label required">Nome e Cognome</label>
-                        <input type="text" id="permessiNome" class="form-control" readonly>
+                        <label for="permessiNome" class="form-label required">Nome e Cognome</label>
+                        <input type="text" id="permessiNome" class="form-control" readonly aria-readonly="true">
                     </div>
                     <div class="form-group">
-                        <label class="form-label required">Data Permesso</label>
-                        <input type="date" id="permessiData" class="form-control" required>
+                        <label for="permessiData" class="form-label required">Data Permesso</label>
+                        <input type="date" id="permessiData" class="form-control" required aria-required="true">
                     </div>
                     <div class="form-row">
                         <div class="form-group">
-                            <label class="form-label required">Ora Inizio</label>
-                            <input type="time" id="permessiOraInizio" class="form-control" required>
+                            <label for="permessiOraInizio" class="form-label required">Ora Inizio</label>
+                            <input type="time" id="permessiOraInizio" class="form-control" required aria-required="true">
                         </div>
                         <div class="form-group">
-                            <label class="form-label required">Ora Fine</label>
-                            <input type="time" id="permessiOraFine" class="form-control" required>
+                            <label for="permessiOraFine" class="form-label required">Ora Fine</label>
+                            <input type="time" id="permessiOraFine" class="form-control" required aria-required="true">
                         </div>
                     </div>
                     <div class="form-group">
-                        <label class="form-label">Motivazione</label>
+                        <label for="permessiMotivazione">Motivazione</label>
                         <textarea id="permessiMotivazione" class="form-control" rows="3" placeholder="Motivazione (opzionale)"></textarea>
                     </div>
                     <div class="form-actions">
@@ -358,34 +373,121 @@
                 </form>
             </div>
         </section>
-        <!-- Modale per cambio password (rimane uguale) -->
-<dialog id="changePasswordDialog" class="modal">
+
+        <!-- Modale per cambio password -->
+        <dialog id="changePasswordDialog" class="modal" aria-labelledby="changePasswordTitle">
+            <div class="modal-content">
+                <h3 id="changePasswordTitle">Cambia Password</h3>
+                <form id="changePasswordForm" novalidate>
+                    <div class="form-group">
+                        <label for="currentPassword">Password Attuale</label>
+                        <input type="password" id="currentPassword" class="form-control" required autocomplete="current-password" aria-required="true">
+                    </div>
+                    <div class="form-group">
+                        <label for="newPassword">Nuova Password</label>
+                        <input type="password" id="newPassword" class="form-control" required minlength="6" aria-required="true">
+                        <small class="form-help">Minimo 6 caratteri. Usa una combinazione di lettere e numeri.</small>
+                    </div>
+                    <div class="form-group">
+                        <label for="confirmPassword">Conferma Nuova Password</label>
+                        <input type="password" id="confirmPassword" class="form-control" required aria-required="true">
+                    </div>
+                    <div id="passwordStrength" class="password-strength" aria-live="polite"></div>
+                    <div class="modal-actions">
+                        <button type="submit" class="btn btn-primary">Cambia Password</button>
+                        <button type="button" id="closeChangePassword" class="btn btn-secondary">Annulla</button>
+                    </div>
+                </form>
+            </div>
+        </dialog>
+    </div>
+<dialog id="editRequestDialog" class="modal">
     <div class="modal-content">
-        <h3>Cambia Password</h3>
-        <form id="changePasswordForm">
-            <div class="form-group">
-                <label for="currentPassword">Password Attuale</label>
-                <input type="password" id="currentPassword" class="form-control" required autocomplete="current-password">
+        <h3>Modifica Richiesta</h3>
+        <form id="editRequestForm">
+            <input type="hidden" id="editRequestId">
+            <input type="hidden" id="editRequestType">
+            
+            <!-- Campi Ferie - SENZA required iniziale -->
+            <div id="editFerieFields" class="edit-fields" style="display: none;">
+                <div class="form-group">
+                    <label class="form-label required">Data Inizio</label>
+                    <input type="date" id="editFerieDataInizio" class="form-control">
+                </div>
+                <div class="form-group">
+                    <label class="form-label required">Data Fine</label>
+                    <input type="date" id="editFerieDataFine" class="form-control">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Giorni richiesti</label>
+                    <input type="number" id="editFerieGiorni" class="form-control" readonly>
+                    <small class="form-help">Calcolo automatico (esclude weekend)</small>
+                </div>
             </div>
-            <div class="form-group">
-                <label for="newPassword">Nuova Password</label>
-                <input type="password" id="newPassword" class="form-control" required minlength="6">
-                <small class="form-help">Minimo 6 caratteri. Usa una combinazione di lettere e numeri.</small>
+            
+            <!-- Campi Malattia - SENZA required iniziale -->
+            <div id="editMalattiaFields" class="edit-fields" style="display: none;">
+                <div class="form-group">
+                    <label class="form-label required">Data Inizio</label>
+                    <input type="date" id="editMalattiaDataInizio" class="form-control">
+                </div>
+                <div class="form-group">
+                    <label class="form-label required">Data Fine</label>
+                    <input type="date" id="editMalattiaDataFine" class="form-control">
+                </div>
+                <div class="form-group">
+                    <label class="form-label required">Numero Certificato</label>
+                    <input type="text" id="editMalattiaNumeroCertificato" class="form-control">
+                </div>
+                <div class="form-group">
+                    <label class="form-label required">Data Certificato</label>
+                    <input type="date" id="editMalattiaDataCertificato" class="form-control">
+                </div>
             </div>
-            <div class="form-group">
-                <label for="confirmPassword">Conferma Nuova Password</label>
-                <input type="password" id="confirmPassword" class="form-control" required>
+            
+            <!-- Campi Permessi - SENZA required iniziale -->
+            <div id="editPermessiFields" class="edit-fields" style="display: none;">
+                <div class="form-group">
+                    <label class="form-label required">Data Permesso</label>
+                    <input type="date" id="editPermessiData" class="form-control">
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label required">Ora Inizio</label>
+                        <input type="time" id="editPermessiOraInizio" class="form-control">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label required">Ora Fine</label>
+                        <input type="time" id="editPermessiOraFine" class="form-control">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Motivazione</label>
+                    <textarea id="editPermessiMotivazione" class="form-control" rows="3"></textarea>
+                </div>
             </div>
-            <div class="password-strength" id="passwordStrength"></div>
+            
+            <div id="editInfoMessage" class="info-message" style="display: none;">
+                <p>⚠️ <strong>Nota:</strong> La richiesta tornerà in stato "In attesa" dopo la modifica.</p>
+            </div>
+            
             <div class="modal-actions">
-                <button type="submit" class="btn btn-primary">Cambia Password</button>
-                <button type="button" id="closeChangePassword" class="btn btn-secondary">Annulla</button>
+                <button type="submit" class="btn btn-primary">Salva Modifiche</button>
+                <button type="button" id="closeEditRequest" class="btn btn-secondary">Annulla</button>
             </div>
         </form>
     </div>
 </dialog>
-    </div>
-
-    <script src="script.js"></script>
+    <script src="script.js" defer></script>
+    <script>
+        // Inizializzazione sicura di EmailJS (da spostare in script.js dopo il caricamento)
+        document.addEventListener('DOMContentLoaded', function() {
+            if (typeof emailjs !== 'undefined') {
+                // IMPORTANTE: Usare variabili d'ambiente o backend per la public key
+                // emailjs.init("YOUR_PUBLIC_KEY");
+                console.log('EmailJS ready - Initialize with your public key from environment variable');
+            }
+        });
+    </script>
 </body>
 </html>

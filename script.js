@@ -543,7 +543,7 @@ function renderEmployeesPage() {
             </td>
             <td data-label="Azioni" class="actions-cell">
                 ${!isCurrentUser ? `
-                    <button class="btn-small update-role" data-id="${employee.id}">Aggiorna Ruolo</button>
+                   
                     <button class="btn-small reset-password" data-email="${safeEmail}" data-name="${safeName}">🔄 Reset Password</button>
                     <button class="btn-small btn-danger delete-employee" data-id="${employee.id}" data-name="${safeName}">🗑️ Elimina</button>
                 ` : '<span class="text-muted">(Utente corrente)</span>'}

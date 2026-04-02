@@ -1,3 +1,6 @@
+
+
+
 // ==================== CONFIGURAZIONE ====================
 const firebaseConfig = {
     apiKey: "AIzaSyAVlSo3W578ClzYE4z2qLQfaNaDIk41USI",
@@ -43,7 +46,10 @@ const appState = {
     employeesPageSize: CONSTANTS.EMPLOYEES_PAGE_SIZE,
     totalEmployees: 0,
     allEmployees: [],
-    listeners: new Map() // Per tracciare event listener
+    listeners: new Map(), // Per tracciare event listener
+    currentCalendarDate: new Date(),
+    allAbsences: [],
+    notificationsEnabled: false
 };
 
 // ==================== UTILITY FUNCTIONS ====================
@@ -359,12 +365,33 @@ async function handleLogin(e) {
         appState.currentUserData = userData;
         appState.isAdmin = userData.role === 'admin';
         
-        // Setup UI
-        setupUI();
+        // Setup UI - usa la funzione corretta
+        if (typeof setupUIWithCalendar === 'function') {
+            setupUIWithCalendar();
+        } else if (typeof setupUI === 'function') {
+            setupUI();
+        } else {
+            // Fallback: mostra l'app manualmente
+            const loginContainer = document.getElementById('loginContainer');
+            const mainContainer = document.getElementById('mainContainer');
+            if (loginContainer) loginContainer.style.display = 'none';
+            if (mainContainer) mainContainer.style.display = 'block';
+            
+            // Mostra nome utente
+            const loggedInUser = document.getElementById('loggedInUser');
+            if (loggedInUser) {
+                loggedInUser.textContent = `${escapeHtml(userData.name)}${appState.isAdmin ? ' (Admin)' : ''}`;
+            }
+            
+            // Carica richieste
+            if (typeof loadRequests === 'function') loadRequests();
+        }
         
         showError('');
         showToast(`Benvenuto ${escapeHtml(userData.name)}`, 'success');
-        announceToScreenReader(`Accesso effettuato come ${userData.name}`);
+        if (typeof announceToScreenReader === 'function') {
+            announceToScreenReader(`Accesso effettuato come ${userData.name}`);
+        }
         
     } catch (error) {
         console.error('Login error:', error);
@@ -703,6 +730,7 @@ async function loadRequests() {
     }
 }
 
+// Versione corretta di renderRequestsWithAttachments
 function renderRequestsWithAttachments(docs) {
     const richiesteBody = document.getElementById('richiesteBody');
     if (!richiesteBody) return;
@@ -728,7 +756,8 @@ function renderRequestsWithAttachments(docs) {
                 periodo = `${formatDate(data.dataInizio)} - ${formatDate(data.dataFine)}`;
                 dettagli = `Cert. n. ${escapeHtml(data.numeroCertificato || '')}`;
                 if (data.attachment) {
-                    dettagli += ` <button class="btn-small download-attachment" data-attachment='${JSON.stringify(data.attachment)}'>📎 Scarica PDF</button>`;
+                    const attachmentData = data.attachment;
+                    dettagli += ` <button class="btn-small download-attachment" data-attachment-name="${escapeHtml(attachmentData.name || 'certificato.pdf')}" data-attachment-data="${escapeHtml(attachmentData.data || '')}">📎 Scarica PDF</button>`;
                 }
                 break;
             case 'Permesso':
@@ -758,9 +787,9 @@ function renderRequestsWithAttachments(docs) {
         
         // Listener per download allegati
         const downloadBtn = row.querySelector('.download-attachment');
-        if (downloadBtn) {
+        if (downloadBtn && data.attachment && data.attachment.data) {
             downloadBtn.addEventListener('click', () => {
-                const attachmentData = JSON.parse(downloadBtn.getAttribute('data-attachment'));
+                const attachmentData = data.attachment;
                 if (attachmentData && attachmentData.data) {
                     const link = document.createElement('a');
                     link.href = attachmentData.data;
@@ -773,6 +802,16 @@ function renderRequestsWithAttachments(docs) {
         attachRequestEventListeners(row, doc.id, data);
         richiesteBody.appendChild(row);
     });
+}
+// Assicurati che formatDate sia definita
+function formatDate(dateValue) {
+    if (!dateValue) return 'N/D';
+    try {
+        const date = dateValue.toDate ? dateValue.toDate() : new Date(dateValue);
+        return date.toLocaleDateString('it-IT');
+    } catch {
+        return 'N/D';
+    }
 }
 
 
@@ -1724,21 +1763,92 @@ function exportToExcel() {
 }
 
 // ==================== UI SETUP ====================
+// Versione corretta di setupUIWithCalendar (senza ricorsione)
+// Versione CORRETTA di setupUIWithCalendar (SENZA ricorsione)
 function setupUIWithCalendar() {
-    setupUI(); // Chiama la funzione originale
+    console.log('🎯 setupUIWithCalendar chiamata');
     
-    const calendarSection = document.getElementById('calendarSection');
-    if (calendarSection && appState.isAdmin) {
-        calendarSection.style.display = 'block';
-        loadCalendarData();
-        initNotifications();
-    } else if (calendarSection) {
-        calendarSection.style.display = 'none';
+    const userData = appState.currentUserData;
+    const isAdmin = appState.isAdmin;
+    
+    if (!userData) {
+        console.error('❌ userData non disponibile');
+        return;
     }
     
-    addAttachmentFieldToMalattiaForm();
+    // Mostra nome utente
+    const loggedInUser = document.getElementById('loggedInUser');
+    if (loggedInUser) {
+        loggedInUser.textContent = `${escapeHtml(userData.name)}${isAdmin ? ' (Admin)' : ''}`;
+    }
+    
+    // Mostra/nascondi controlli admin
+    const adminControls = document.getElementById('adminControls');
+    if (adminControls) {
+        adminControls.style.display = isAdmin ? 'block' : 'none';
+    }
+    
+    // Mostra/nascondi form richieste
+    const requestForms = document.getElementById('requestForms');
+    if (requestForms) {
+        requestForms.style.display = isAdmin ? 'none' : 'block';
+    }
+    
+    // Mostra sezione cambio password se necessaria
+    if (typeof showPasswordSectionIfNeeded === 'function') {
+        showPasswordSectionIfNeeded();
+    }
+    
+    // Imposta nome nei form
+    const nameFields = ['ferieNome', 'malattiaNome', 'permessiNome'];
+    nameFields.forEach(id => {
+        const field = document.getElementById(id);
+        if (field) field.value = userData.name;
+    });
+    
+    // Mostra app principale
+    const loginContainer = document.getElementById('loginContainer');
+    const mainContainer = document.getElementById('mainContainer');
+    if (loginContainer) loginContainer.style.display = 'none';
+    if (mainContainer) mainContainer.style.display = 'block';
+    
+    // Carica richieste
+    if (typeof loadRequests === 'function') {
+        loadRequests();
+    }
+    
+    // Setup realtime listener
+    if (typeof setupRealtimeListener === 'function') {
+        setupRealtimeListener();
+    }
+    
+    // MOSTRA CALENDARIO (solo admin)
+    const calendarSection = document.getElementById('calendarSection');
+    if (calendarSection) {
+        if (isAdmin) {
+            calendarSection.style.display = 'block';
+            if (typeof loadCalendarData === 'function') {
+                loadCalendarData();
+            }
+            if (typeof initNotifications === 'function') {
+                initNotifications();
+            }
+        } else {
+            calendarSection.style.display = 'none';
+        }
+    }
+    
+    // Aggiungi campo allegato al form malattia (solo se non admin)
+    if (!isAdmin && typeof addAttachmentFieldToMalattiaForm === 'function') {
+        addAttachmentFieldToMalattiaForm();
+    }
+    
+    if (typeof announceToScreenReader === 'function') {
+        announceToScreenReader(`Accesso effettuato come ${userData.name}`);
+    }
+    
+    console.log('✅ setupUIWithCalendar completata');
 }
-
 // Aggiungi event listener per calendario
 function initCalendarEvents() {
     const prevMonthBtn = document.getElementById('prevMonth');
@@ -2002,7 +2112,11 @@ function setupFirebaseAuth() {
                     appState.currentUser = user;
                     appState.currentUserData = userDoc.data();
                     appState.isAdmin = userDoc.data().role === 'admin';
-                    setupUI();
+                    
+                    // CHIAMA DIRETTAMENTE setupUIWithCalendar (non setupUI)
+                    if (typeof setupUIWithCalendar === 'function') {
+                        setupUIWithCalendar();
+                    }
                 } else {
                     await auth.signOut();
                     showLogin();
@@ -2683,14 +2797,13 @@ function highlightEditedRequest(requestId) {
 let currentCalendarDate = new Date();
 let allAbsences = [];
 
+// Versione corretta di loadCalendarData
 async function loadCalendarData() {
     if (!appState.isAdmin) return;
     
     try {
         const year = currentCalendarDate.getFullYear();
         const month = currentCalendarDate.getMonth();
-        const startDate = new Date(year, month, 1);
-        const endDate = new Date(year, month + 1, 1);
         
         const snapshot = await db.collection('richieste')
             .where('stato', '==', 'Approvato')
@@ -2703,7 +2816,7 @@ async function loadCalendarData() {
             
             if (data.tipo === 'Permesso') {
                 const date = data.data?.toDate();
-                if (date && date >= startDate && date < endDate) {
+                if (date && date.getMonth() === month && date.getFullYear() === year) {
                     absenceDays.push({
                         date: date,
                         type: data.tipo,
@@ -2712,26 +2825,26 @@ async function loadCalendarData() {
                         requestId: doc.id
                     });
                 }
-            } else {
+            } else if (data.tipo === 'Ferie' || data.tipo === 'Malattia') {
                 const start = data.dataInizio?.toDate();
                 const end = data.dataFine?.toDate();
-                if (start && end && end >= startDate && start < endDate) {
-                    let current = new Date(Math.max(start, startDate));
-                    const endLimit = new Date(Math.min(end, new Date(endDate - 1)));
-                    
-                    while (current <= endLimit) {
-                        const dayOfWeek = current.getDay();
-                        if (dayOfWeek !== 0 && dayOfWeek !== 6) {
-                            absenceDays.push({
-                                date: new Date(current),
-                                type: data.tipo,
-                                userName: data.userName,
-                                details: data.tipo === 'Malattia' ? 
-                                    `Cert. ${data.numeroCertificato || 'N/D'}` : 
-                                    `${data.giorni || 1} giorni`,
-                                requestId: doc.id,
-                                attachment: data.attachmentUrl || null
-                            });
+                if (start && end) {
+                    let current = new Date(start);
+                    while (current <= end) {
+                        if (current.getMonth() === month && current.getFullYear() === year) {
+                            const dayOfWeek = current.getDay();
+                            if (dayOfWeek !== 0 && dayOfWeek !== 6) {
+                                absenceDays.push({
+                                    date: new Date(current),
+                                    type: data.tipo,
+                                    userName: data.userName,
+                                    details: data.tipo === 'Malattia' ? 
+                                        `Cert. ${data.numeroCertificato || 'N/D'}` : 
+                                        `${data.giorni || 1} giorni`,
+                                    requestId: doc.id,
+                                    attachment: data.attachment || null
+                                });
+                            }
                         }
                         current.setDate(current.getDate() + 1);
                     }
@@ -2895,17 +3008,17 @@ async function checkTodayAbsences() {
     today.setHours(0, 0, 0, 0);
     
     const todayAbsences = allAbsences.filter(absence => 
-        absence.date.toDateString() === today.toDateString()
+        absence.date && absence.date.toDateString() === today.toDateString()
     );
     
     if (todayAbsences.length > 0) {
         const message = `📋 Oggi ci sono ${todayAbsences.length} assenze: ${todayAbsences.map(a => a.userName).join(', ')}`;
         
-        // Mostra alert visivo
         showToast(message, 'warning');
-        announceToScreenReader(message);
+        if (typeof announceToScreenReader === 'function') {
+            announceToScreenReader(message);
+        }
         
-        // Notifica desktop
         if (notificationsEnabled && Notification.permission === 'granted') {
             new Notification('📅 Assenze Oggi', {
                 body: message,
@@ -2913,9 +3026,6 @@ async function checkTodayAbsences() {
                 tag: 'daily-absences'
             });
         }
-        
-        // Invia email notifica (opzionale - richiede EmailJS configurato)
-        await sendAbsenceNotificationEmail(todayAbsences);
     }
 }
 
@@ -3015,62 +3125,59 @@ async function uploadAttachment(file, requestType) {
 }
 
 // ==================== INITIALIZATION ====================
-function initializeAppWithFeatures() {
-    // Chiama initializeApp originale
-    if (typeof initializeApp === 'function') {
-        initializeApp();
-    } else {
-        initializeModals();
-        initializeEditModal();
-        setupEditDialogReset();
-        initializeEventListeners();
-        initPasswordToggle();
-        initPasswordStrengthChecker();
+// Versione corretta di initializeAppWithFeatures
+// ==================== INITIALIZATION ====================
+// ==================== INITIALIZATION ====================
+function initializeApp() {
+    console.log('🚀 Avvio applicazione...');
+    
+    // Inizializza modali
+    if (typeof initializeModals === 'function') initializeModals();
+    if (typeof initializeEditModal === 'function') initializeEditModal();
+    if (typeof setupEditDialogReset === 'function') setupEditDialogReset();
+    if (typeof initializeEventListeners === 'function') initializeEventListeners();
+    if (typeof initPasswordToggle === 'function') initPasswordToggle();
+    if (typeof initPasswordStrengthChecker === 'function') initPasswordStrengthChecker();
+    
+    // Inizializza eventi calendario
+    if (typeof initCalendarEvents === 'function') initCalendarEvents();
+    
+    // Setup Firebase auth (questo chiamerà setupUIWithCalendar quando l'utente è loggato)
+    if (typeof setupFirebaseAuth === 'function') {
         setupFirebaseAuth();
     }
     
-    // Aggiungi nuove funzionalità
-    initCalendarEvents();
-    
-    // Override setupUI
-    const originalSetupUI = window.setupUI;
-    window.setupUI = setupUIWithCalendar;
-    
-    // Override renderRequests
-    window.renderRequests = renderRequestsWithAttachments;
-    
-    // Override handleMalattiaSubmit
-    window.handleMalattiaSubmit = handleMalattiaSubmit;
-    
     // Aggiungi stili dinamici
-    const style = document.createElement('style');
-    style.textContent = `
-        @keyframes slideDown {
-            from { opacity: 0; transform: translateY(-20px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-        .btn-small.download-attachment {
-            background: #4CAF50;
-            color: white;
-            border: none;
-            padding: 2px 8px;
-            border-radius: 12px;
-            cursor: pointer;
-            font-size: 0.7rem;
-            margin-left: 5px;
-        }
-        .btn-small.download-attachment:hover {
-            background: #45a049;
-        }
-    `;
-    document.head.appendChild(style);
-}
-
-// Avvio applicazione con nuove funzionalità
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initializeAppWithFeatures);
-} else {
-    initializeAppWithFeatures();
+    if (!document.getElementById('dynamic-calendar-styles')) {
+        const style = document.createElement('style');
+        style.id = 'dynamic-calendar-styles';
+        style.textContent = `
+            @keyframes slideDown {
+                from { opacity: 0; transform: translateY(-20px); }
+                to { opacity: 1; transform: translateY(0); }
+            }
+            .btn-small.download-attachment {
+                background: #4CAF50;
+                color: white;
+                border: none;
+                padding: 2px 8px;
+                border-radius: 12px;
+                cursor: pointer;
+                font-size: 0.7rem;
+                margin-left: 5px;
+            }
+            .btn-small.download-attachment:hover {
+                background: #45a049;
+            }
+            .absence-details {
+                max-height: 400px;
+                overflow-y: auto;
+            }
+        `;
+        document.head.appendChild(style);
+    }
+    
+    console.log('✅ Applicazione avviata');
 }
 
 // Avvio applicazione

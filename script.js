@@ -1,6 +1,3 @@
-
-
-
 // ==================== CONFIGURAZIONE ====================
 const firebaseConfig = {
     apiKey: "AIzaSyAVlSo3W578ClzYE4z2qLQfaNaDIk41USI",
@@ -14,17 +11,16 @@ const app = firebase.initializeApp(firebaseConfig);
 const auth = firebase.auth();
 const db = firebase.firestore();
 
-// Configurazione EmailJS - DA SPOSTARE IN VARIABILI D'AMBIENTE
+// Configurazione EmailJS
 const EMAILJS_CONFIG = {
-    // In produzione, usa: import.meta.env.VITE_EMAILJS_PUBLIC_KEY
-    publicKey: 'YOUR_PUBLIC_KEY', // Da configurare tramite variabili d'ambiente
+    publicKey: 'YOUR_PUBLIC_KEY',
     serviceId: 'YOUR_SERVICE_ID',
     templateId: 'YOUR_TEMPLATE_ID'
 };
 
 // ==================== COSTANTI ====================
 const CONSTANTS = {
-    TEMP_PASSWORD: 'union14.it', // Da modificare al primo deploy
+    TEMP_PASSWORD: 'union14.it',
     PASSWORD_MIN_LENGTH: 8,
     PAGE_SIZE_DEFAULT: 10,
     EMPLOYEES_PAGE_SIZE: 5,
@@ -46,14 +42,15 @@ const appState = {
     employeesPageSize: CONSTANTS.EMPLOYEES_PAGE_SIZE,
     totalEmployees: 0,
     allEmployees: [],
-    listeners: new Map(), // Per tracciare event listener
-    currentCalendarDate: new Date(),
-    allAbsences: [],
-    notificationsEnabled: false
+    listeners: new Map()
 };
 
+// ==================== VARIABILI CALENDARIO ====================
+let currentCalendarDate = new Date();
+let allAbsences = [];
+let notificationsEnabled = false;
+
 // ==================== UTILITY FUNCTIONS ====================
-// Sanitizzazione HTML (XSS Prevention)
 function escapeHtml(text) {
     if (!text) return '';
     const div = document.createElement('div');
@@ -61,13 +58,11 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
-// Sanitizzazione per input SQL/NoSQL
 function sanitizeInput(input) {
     if (!input) return '';
     return String(input).trim().replace(/[<>]/g, '');
 }
 
-// Debounce per ottimizzazione performance
 function debounce(func, wait) {
     let timeout;
     return function executedFunction(...args) {
@@ -80,7 +75,6 @@ function debounce(func, wait) {
     };
 }
 
-// Gestione errori centralizzata
 function handleError(error, context = '') {
     console.error(`Error in ${context}:`, error);
     
@@ -106,7 +100,6 @@ function handleError(error, context = '') {
     return userMessage;
 }
 
-// Validazione password più robusta
 function validatePassword(password, isNewPassword = false) {
     const errors = [];
     
@@ -118,15 +111,12 @@ function validatePassword(password, isNewPassword = false) {
         if (password.length < CONSTANTS.PASSWORD_MIN_LENGTH) {
             errors.push(`La password deve avere almeno ${CONSTANTS.PASSWORD_MIN_LENGTH} caratteri`);
         }
-        
         if (!/[A-Z]/.test(password)) {
             errors.push('La password deve contenere almeno una lettera maiuscola');
         }
-        
         if (!/[0-9]/.test(password)) {
             errors.push('La password deve contenere almeno un numero');
         }
-        
         if (!/[^A-Za-z0-9]/.test(password)) {
             errors.push('La password deve contenere almeno un carattere speciale');
         }
@@ -138,30 +128,20 @@ function validatePassword(password, isNewPassword = false) {
     };
 }
 
-// Calcolo forza password migliorato
 function checkPasswordStrength(password) {
     if (!password) return { score: 0, label: '', class: '', suggestions: [] };
     
     let score = 0;
     const suggestions = [];
     
-    // Lunghezza
     if (password.length >= 8) score++;
     if (password.length >= 12) score++;
     if (password.length < 8) suggestions.push('Usa almeno 8 caratteri');
-    
-    // Lettere maiuscole
     if (/[A-Z]/.test(password)) score++;
     else suggestions.push('Aggiungi lettere maiuscole');
-    
-    // Lettere minuscole
     if (/[a-z]/.test(password)) score++;
-    
-    // Numeri
     if (/[0-9]/.test(password)) score++;
     else suggestions.push('Aggiungi numeri');
-    
-    // Caratteri speciali
     if (/[^A-Za-z0-9]/.test(password)) score++;
     else suggestions.push('Aggiungi caratteri speciali (!@#$%^&*)');
     
@@ -180,7 +160,6 @@ function checkPasswordStrength(password) {
     return { score, label, className, suggestions };
 }
 
-// ==================== UI MANAGEMENT ====================
 function setLoadingState(element, isLoading, customText = null) {
     if (!element) return;
     
@@ -302,7 +281,44 @@ function formatDate(dateValue) {
     }
 }
 
+function showError(message) {
+    const errorEl = document.getElementById('loginError');
+    if (errorEl) {
+        errorEl.textContent = message;
+        errorEl.style.display = message ? 'block' : 'none';
+        if (message) {
+            errorEl.setAttribute('role', 'alert');
+        }
+    }
+}
+
+function showLogin() {
+    const loginContainer = document.getElementById('loginContainer');
+    const mainContainer = document.getElementById('mainContainer');
+    const loginForm = document.getElementById('loginForm');
+    
+    if (loginContainer) loginContainer.style.display = 'flex';
+    if (mainContainer) mainContainer.style.display = 'none';
+    if (loginForm) loginForm.reset();
+    
+    showError('');
+}
+
 // ==================== AUTHENTICATION ====================
+function getAuthErrorMessage(error) {
+    const errors = {
+        'auth/invalid-email': 'Email non valida',
+        'auth/user-disabled': 'Account disabilitato. Contatta l\'amministratore',
+        'auth/user-not-found': 'Utente non trovato',
+        'auth/wrong-password': 'Password errata',
+        'auth/too-many-requests': 'Troppi tentativi falliti. Riprova più tardi',
+        'auth/network-request-failed': 'Errore di connessione. Verifica la tua rete',
+        'auth/invalid-login-credentials': 'Email o password non validi',
+        'auth/requires-recent-login': 'Per sicurezza, effettua di nuovo il login'
+    };
+    return errors[error.code] || `Errore: ${error.message}`;
+}
+
 async function handleLogin(e) {
     e.preventDefault();
     
@@ -310,7 +326,6 @@ async function handleLogin(e) {
     const password = document.getElementById('password')?.value || '';
     const submitBtn = e.target.querySelector('button[type="submit"]');
     
-    // Validazione
     if (!email || !password) {
         showError('Inserisci email e password');
         return;
@@ -324,27 +339,22 @@ async function handleLogin(e) {
     try {
         setLoadingState(submitBtn, true);
         
-        // Login con Firebase
         const userCredential = await auth.signInWithEmailAndPassword(email, password);
         const user = userCredential.user;
         
-        // Recupera dati utente
         let userDoc = await db.collection('users').doc(user.uid).get();
         
-        // Se non trova, cerca per email (migrazione)
         if (!userDoc.exists) {
             const querySnapshot = await db.collection('users').where('email', '==', email).get();
             
             if (!querySnapshot.empty) {
                 userDoc = querySnapshot.docs[0];
-                // Migra documento
                 await db.collection('users').doc(user.uid).set(userDoc.data());
                 await db.collection('users').doc(userDoc.id).delete();
                 userDoc = await db.collection('users').doc(user.uid).get();
             }
         }
         
-        // Crea automaticamente se non esiste
         if (!userDoc.exists) {
             const newUserData = {
                 name: user.displayName || email.split('@')[0],
@@ -360,38 +370,15 @@ async function handleLogin(e) {
         
         const userData = userDoc.data();
         
-        // Aggiorna stato
         appState.currentUser = user;
         appState.currentUserData = userData;
         appState.isAdmin = userData.role === 'admin';
         
-        // Setup UI - usa la funzione corretta
-        if (typeof setupUIWithCalendar === 'function') {
-            setupUIWithCalendar();
-        } else if (typeof setupUI === 'function') {
-            setupUI();
-        } else {
-            // Fallback: mostra l'app manualmente
-            const loginContainer = document.getElementById('loginContainer');
-            const mainContainer = document.getElementById('mainContainer');
-            if (loginContainer) loginContainer.style.display = 'none';
-            if (mainContainer) mainContainer.style.display = 'block';
-            
-            // Mostra nome utente
-            const loggedInUser = document.getElementById('loggedInUser');
-            if (loggedInUser) {
-                loggedInUser.textContent = `${escapeHtml(userData.name)}${appState.isAdmin ? ' (Admin)' : ''}`;
-            }
-            
-            // Carica richieste
-            if (typeof loadRequests === 'function') loadRequests();
-        }
+        setupUI();
         
         showError('');
         showToast(`Benvenuto ${escapeHtml(userData.name)}`, 'success');
-        if (typeof announceToScreenReader === 'function') {
-            announceToScreenReader(`Accesso effettuato come ${userData.name}`);
-        }
+        announceToScreenReader(`Accesso effettuato come ${userData.name}`);
         
     } catch (error) {
         console.error('Login error:', error);
@@ -403,13 +390,11 @@ async function handleLogin(e) {
 
 async function handleLogout() {
     try {
-        // Pulizia listener
         if (appState.realtimeListener) {
             appState.realtimeListener();
             appState.realtimeListener = null;
         }
         
-        // Pulizia event listeners
         appState.listeners.forEach((listener, element) => {
             if (element && element.removeEventListener) {
                 element.removeEventListener(listener.event, listener.handler);
@@ -419,7 +404,6 @@ async function handleLogout() {
         
         await auth.signOut();
         
-        // Reset state
         appState.currentUser = null;
         appState.currentUserData = null;
         appState.isAdmin = false;
@@ -454,185 +438,6 @@ async function handlePasswordReset(e) {
     }
 }
 
-function getAuthErrorMessage(error) {
-    const errors = {
-        'auth/invalid-email': 'Email non valida',
-        'auth/user-disabled': 'Account disabilitato. Contatta l\'amministratore',
-        'auth/user-not-found': 'Utente non trovato',
-        'auth/wrong-password': 'Password errata',
-        'auth/too-many-requests': 'Troppi tentativi falliti. Riprova più tardi',
-        'auth/network-request-failed': 'Errore di connessione. Verifica la tua rete',
-        'auth/invalid-login-credentials': 'Email o password non validi',
-        'auth/requires-recent-login': 'Per sicurezza, effettua di nuovo il login'
-    };
-    return errors[error.code] || `Errore: ${error.message}`;
-}
-
-function showError(message) {
-    const errorEl = document.getElementById('loginError');
-    if (errorEl) {
-        errorEl.textContent = message;
-        errorEl.style.display = message ? 'block' : 'none';
-        if (message) {
-            errorEl.setAttribute('role', 'alert');
-        }
-    }
-}
-
-function showLogin() {
-    const loginContainer = document.getElementById('loginContainer');
-    const mainContainer = document.getElementById('mainContainer');
-    const loginForm = document.getElementById('loginForm');
-    
-    if (loginContainer) loginContainer.style.display = 'flex';
-    if (mainContainer) mainContainer.style.display = 'none';
-    if (loginForm) loginForm.reset();
-    
-    showError('');
-}
-
-// ==================== PASSWORD MANAGEMENT ====================
-async function handleChangePassword(e) {
-    e.preventDefault();
-    
-    const currentPassword = document.getElementById('currentPassword')?.value;
-    const newPassword = document.getElementById('newPassword')?.value;
-    const confirmPassword = document.getElementById('confirmPassword')?.value;
-    
-    // Validazioni
-    const currentValidation = validatePassword(currentPassword);
-    if (!currentValidation.isValid) {
-        showFeedback('Errore', currentValidation.errors[0]);
-        return;
-    }
-    
-    const newValidation = validatePassword(newPassword, true);
-    if (!newValidation.isValid) {
-        showFeedback('Errore', newValidation.errors.join('\n'));
-        return;
-    }
-    
-    if (newPassword !== confirmPassword) {
-        showFeedback('Errore', 'Le nuove password non coincidono');
-        return;
-    }
-    
-    if (newPassword === currentPassword) {
-        showFeedback('Errore', 'La nuova password deve essere diversa da quella attuale');
-        return;
-    }
-    
-    try {
-        const submitBtn = e.target.querySelector('button[type="submit"]');
-        setLoadingState(submitBtn, true);
-        
-        const user = auth.currentUser;
-        if (!user) throw new Error('Utente non autenticato');
-        
-        // Re-autenticazione
-        const credential = firebase.auth.EmailAuthProvider.credential(user.email, currentPassword);
-        await user.reauthenticateWithCredential(credential);
-        
-        // Aggiorna password
-        await user.updatePassword(newPassword);
-        
-        // Aggiorna Firestore
-        await db.collection('users').doc(user.uid).update({
-            temporaryPassword: false,
-            passwordUpdatedAt: firebase.firestore.FieldValue.serverTimestamp(),
-            passwordVersion: firebase.firestore.FieldValue.increment(1)
-        });
-        
-        // Aggiorna stato locale
-        if (appState.currentUserData) {
-            appState.currentUserData.temporaryPassword = false;
-        }
-        
-        // Chiudi modale
-        const dialog = document.getElementById('changePasswordDialog');
-        if (dialog) dialog.close();
-        
-        showFeedback('Successo', 'Password cambiata con successo!');
-        showToast('Password aggiornata!', 'success');
-        
-        // Nascondi sezione password temporanea
-        const passwordSection = document.getElementById('passwordSection');
-        if (passwordSection) {
-            passwordSection.style.display = 'none';
-        }
-        
-        // Resetta form
-        e.target.reset();
-        const strengthEl = document.getElementById('passwordStrength');
-        if (strengthEl) {
-            strengthEl.textContent = '';
-            strengthEl.className = 'password-strength';
-        }
-        
-    } catch (error) {
-        console.error('Change password error:', error);
-        
-        let errorMessage = 'Errore durante il cambio password';
-        if (error.code === 'auth/wrong-password') {
-            errorMessage = 'Password attuale non corretta';
-        } else if (error.code === 'auth/weak-password') {
-            errorMessage = 'La nuova password è troppo debole';
-        } else if (error.code === 'auth/requires-recent-login') {
-            errorMessage = 'Per sicurezza, effettua di nuovo il login prima di cambiare password';
-            setTimeout(() => handleLogout(), 3000);
-        }
-        
-        showFeedback('Errore', errorMessage);
-    } finally {
-        const submitBtn = e.target.querySelector('button[type="submit"]');
-        setLoadingState(submitBtn, false);
-    }
-}
-
-function initPasswordStrengthChecker() {
-    const newPasswordInput = document.getElementById('newPassword');
-    if (!newPasswordInput) return;
-    
-    const strengthEl = document.getElementById('passwordStrength');
-    
-    newPasswordInput.addEventListener('input', (e) => {
-        const strength = checkPasswordStrength(e.target.value);
-        
-        if (strengthEl) {
-            if (e.target.value.length === 0) {
-                strengthEl.textContent = '';
-                strengthEl.className = 'password-strength';
-                return;
-            }
-            
-            let message = `Forza password: ${strength.label}`;
-            if (strength.suggestions.length > 0 && strength.label === 'Debole') {
-                message += ` - ${strength.suggestions[0]}`;
-            }
-            
-            strengthEl.textContent = message;
-            strengthEl.className = `password-strength ${strength.className}`;
-        }
-    });
-}
-
-function showPasswordSectionIfNeeded() {
-    const passwordSection = document.getElementById('passwordSection');
-    const isAdmin = appState.isAdmin;
-    const hasTemporaryPassword = appState.currentUserData?.temporaryPassword === true;
-    const shouldShow = !isAdmin && hasTemporaryPassword;
-    
-    if (passwordSection) {
-        if (shouldShow) {
-            passwordSection.style.display = 'block';
-            announceToScreenReader('Attenzione: la tua password è temporanea. Cambiala per maggiore sicurezza.');
-            showToast('⚠️ Password temporanea! Cambiala subito.', 'warning');
-        } else {
-            passwordSection.style.display = 'none';
-        }
-    }
-}
-
 // ==================== REQUESTS MANAGEMENT ====================
 function calcolaGiorniLavorativi(inizio, fine) {
     let giorni = 0;
@@ -664,20 +469,14 @@ async function loadRequests() {
     const richiesteBody = document.getElementById('richiesteBody');
     if (!richiesteBody) return;
     
-    richiesteBody.innerHTML = `
-        <tr><td colspan="6" class="text-center">
-            <div class="loading-spinner"></div> Caricamento...
-        </td></tr>
-    `;
+    richiesteBody.innerHTML = `<tr><td colspan="6" class="text-center"><div class="loading-spinner"></div> Caricamento...</td></tr>`;
     
     try {
         let query = db.collection('richieste');
         
-        // Filtri per non-admin
         if (!appState.isAdmin && appState.currentUser) {
             query = query.where('userId', '==', appState.currentUser.uid);
         } else if (appState.isAdmin) {
-            // Filtri admin
             if (appState.filters.type) {
                 query = query.where('tipo', '==', appState.filters.type);
             }
@@ -686,7 +485,6 @@ async function loadRequests() {
             }
         }
         
-        // Filtri temporali
         if (appState.filters.year || appState.filters.month) {
             const year = appState.filters.year ? parseInt(appState.filters.year) : new Date().getFullYear();
             const month = appState.filters.month ? parseInt(appState.filters.month) - 1 : 0;
@@ -694,10 +492,7 @@ async function loadRequests() {
             const endDate = appState.filters.month ? new Date(year, month + 1, 1) : new Date(year + 1, 0, 1);
             const dateField = appState.filters.type === 'Permesso' ? 'data' : 'dataInizio';
             
-            query = query
-                .orderBy(dateField, 'desc')
-                .where(dateField, '>=', startDate)
-                .where(dateField, '<', endDate);
+            query = query.orderBy(dateField, 'desc').where(dateField, '>=', startDate).where(dateField, '<', endDate);
         } else {
             query = query.orderBy('createdAt', 'desc');
         }
@@ -705,12 +500,9 @@ async function loadRequests() {
         const snapshot = await query.get();
         let docs = snapshot.docs;
         
-        // Filtro per dipendente (lato client)
         if (appState.isAdmin && appState.filters.employee) {
             const searchTerm = sanitizeInput(appState.filters.employee).toLowerCase();
-            docs = docs.filter(doc => 
-                doc.data().userName?.toLowerCase().includes(searchTerm)
-            );
+            docs = docs.filter(doc => doc.data().userName?.toLowerCase().includes(searchTerm));
         }
         
         appState.totalRequests = docs.length;
@@ -722,16 +514,11 @@ async function loadRequests() {
         
     } catch (error) {
         handleError(error, 'loadRequests');
-        richiesteBody.innerHTML = `
-            <tr><td colspan="6" class="error text-center">
-                Errore nel caricamento delle richieste
-            </td></tr>
-        `;
+        richiesteBody.innerHTML = `<tr><td colspan="6" class="error text-center">Errore nel caricamento delle richieste</td></tr>`;
     }
 }
 
-// Versione corretta di renderRequestsWithAttachments
-function renderRequestsWithAttachments(docs) {
+function renderRequests(docs) {
     const richiesteBody = document.getElementById('richiesteBody');
     if (!richiesteBody) return;
     
@@ -756,8 +543,7 @@ function renderRequestsWithAttachments(docs) {
                 periodo = `${formatDate(data.dataInizio)} - ${formatDate(data.dataFine)}`;
                 dettagli = `Cert. n. ${escapeHtml(data.numeroCertificato || '')}`;
                 if (data.attachment) {
-                    const attachmentData = data.attachment;
-                    dettagli += ` <button class="btn-small download-attachment" data-attachment-name="${escapeHtml(attachmentData.name || 'certificato.pdf')}" data-attachment-data="${escapeHtml(attachmentData.data || '')}">📎 Scarica PDF</button>`;
+                    dettagli += ` <button class="btn-small download-attachment" data-attachment='${JSON.stringify(data.attachment)}'>📎 Scarica PDF</button>`;
                 }
                 break;
             case 'Permesso':
@@ -785,7 +571,6 @@ function renderRequestsWithAttachments(docs) {
             </td>
         `;
         
-        // Listener per download allegati
         const downloadBtn = row.querySelector('.download-attachment');
         if (downloadBtn && data.attachment && data.attachment.data) {
             downloadBtn.addEventListener('click', () => {
@@ -803,19 +588,7 @@ function renderRequestsWithAttachments(docs) {
         richiesteBody.appendChild(row);
     });
 }
-// Assicurati che formatDate sia definita
-function formatDate(dateValue) {
-    if (!dateValue) return 'N/D';
-    try {
-        const date = dateValue.toDate ? dateValue.toDate() : new Date(dateValue);
-        return date.toLocaleDateString('it-IT');
-    } catch {
-        return 'N/D';
-    }
-}
 
-
-// Funzione helper per renderizzare le azioni
 function renderActionsCell(requestId, data, showEditButton) {
     if (appState.isAdmin) {
         return `
@@ -839,7 +612,6 @@ function renderActionsCell(requestId, data, showEditButton) {
     }
 }
 
-// Funzione helper per attaccare gli event listeners
 function attachRequestEventListeners(row, requestId, data) {
     if (appState.isAdmin) {
         const saveBtn = row.querySelector('.save-status');
@@ -855,141 +627,23 @@ function attachRequestEventListeners(row, requestId, data) {
         
         if (deleteBtn) {
             deleteBtn.addEventListener('click', () => {
-                showConfirmation(
-                    'Elimina Richiesta',
-                    'Sei sicuro di voler eliminare questa richiesta? L\'operazione è irreversibile.',
-                    () => deleteRequest(requestId)
-                );
+                showConfirmation('Elimina Richiesta', 'Sei sicuro di voler eliminare questa richiesta?', () => deleteRequest(requestId));
             });
         }
     } else {
         const editBtn = row.querySelector('.edit-request');
         if (editBtn) {
-            // Clona per rimuovere eventuali listener esistenti
             const newEditBtn = editBtn.cloneNode(true);
             editBtn.parentNode.replaceChild(newEditBtn, editBtn);
-            
             newEditBtn.addEventListener('click', (e) => {
                 e.preventDefault();
                 e.stopPropagation();
-                const requestIdAttr = newEditBtn.getAttribute('data-id');
-                if (requestIdAttr) {
-                    console.log('🖱️ Click modifica per richiesta:', requestIdAttr);
-                    editRequest(requestIdAttr);
-                }
+                editRequest(requestId);
             });
         }
     }
 }
-    
 
-
-
-// CORREZIONE: Aggiungi questa funzione completa (sostituisci quella esistente)
-function initializeEditModal() {
-    const editDialog = document.getElementById('editRequestDialog');
-    const editForm = document.getElementById('editRequestForm');
-    const closeBtn = document.getElementById('closeEditRequest');
-    
-    console.log('🔧 Inizializzazione modal modifica...');
-    
-    if (editForm) {
-        // Rimuovi eventuali listener esistenti per evitare duplicati
-        editForm.removeEventListener('submit', handleEditRequestSubmit);
-        editForm.addEventListener('submit', handleEditRequestSubmit);
-        console.log('✅ Event listener form aggiunto');
-    } else {
-        console.error('❌ Form editRequestForm non trovato');
-    }
-    
-    if (closeBtn) {
-        closeBtn.removeEventListener('click', closeEditModal);
-        closeBtn.addEventListener('click', closeEditModal);
-        console.log('✅ Event listener close aggiunto');
-    }
-    
-    if (editDialog) {
-        editDialog.removeEventListener('click', closeEditModalOnClickOutside);
-        editDialog.addEventListener('click', closeEditModalOnClickOutside);
-        console.log('✅ Event listener dialog aggiunto');
-    }
-}
-
-// Assicurati che resetEditForm sia definita
-function resetEditForm() {
-    const form = document.getElementById('editRequestForm');
-    if (form) {
-        form.reset();
-        console.log('🔄 Form modifica resettato');
-    }
-    
-    // Resetta campi specifici
-    const editFerieGiorni = document.getElementById('editFerieGiorni');
-    if (editFerieGiorni) editFerieGiorni.value = '';
-    
-    // Nascondi tutti i campi
-    document.querySelectorAll('.edit-fields').forEach(field => {
-        field.style.display = 'none';
-    });
-    
-    // Nascondi messaggio informativo
-    const infoMessage = document.getElementById('editInfoMessage');
-    if (infoMessage) infoMessage.style.display = 'none';
-}
-// Funzione di debug per verificare lo stato del modal
-function debugEditModal() {
-    console.log('🔍 DEBUG MODALE MODIFICA:');
-    
-    const dialog = document.getElementById('editRequestDialog');
-    const form = document.getElementById('editRequestForm');
-    const submitBtn = form ? form.querySelector('button[type="submit"]') : null;
-    
-    console.log('- Dialog esiste:', !!dialog);
-    console.log('- Form esiste:', !!form);
-    console.log('- Submit button esiste:', !!submitBtn);
-    console.log('- Dialog visibile:', dialog ? dialog.open : false);
-    
-    if (form) {
-        console.log('- Form ha event listener?', form._listeners || 'non tracciato');
-    }
-    
-    return { dialog, form, submitBtn };
-}
-
-// Esponi per debug in console
-window.debugEditModal = debugEditModal;
-function closeEditModal() {
-    const dialog = document.getElementById('editRequestDialog');
-    if (dialog) dialog.close();
-    console.log('🔒 Modale chiuso');
-}
-
-function closeEditModalOnClickOutside(e) {
-    const dialog = document.getElementById('editRequestDialog');
-    if (e.target === dialog) {
-        dialog.close();
-        console.log('🔒 Modale chiuso (click outside)');
-    }
-}
-function resetEditForm() {
-    const form = document.getElementById('editRequestForm');
-    if (form) form.reset();
-    
-    // Resetta campi specifici
-    const editFerieGiorni = document.getElementById('editFerieGiorni');
-    if (editFerieGiorni) editFerieGiorni.value = '';
-    
-    console.log('🔄 Form modifica resettato');
-}
-// Assicurati che il dialog venga resettato quando viene aperto
-function setupEditDialogReset() {
-    const dialog = document.getElementById('editRequestDialog');
-    if (dialog) {
-        dialog.addEventListener('close', () => {
-            resetEditForm();
-        });
-    }
-}
 async function updateRequestStatus(requestId, newStatus) {
     try {
         await db.collection('richieste').doc(requestId).update({
@@ -1000,7 +654,7 @@ async function updateRequestStatus(requestId, newStatus) {
         
         showFeedback('Successo', `Stato aggiornato a "${newStatus}"`);
         await loadRequests();
-        
+        if (appState.isAdmin && typeof loadCalendarData === 'function') loadCalendarData();
     } catch (error) {
         handleError(error, 'updateRequestStatus');
     }
@@ -1011,7 +665,7 @@ async function deleteRequest(requestId) {
         await db.collection('richieste').doc(requestId).delete();
         showFeedback('Successo', 'Richiesta eliminata con successo');
         await loadRequests();
-        
+        if (appState.isAdmin && typeof loadCalendarData === 'function') loadCalendarData();
     } catch (error) {
         handleError(error, 'deleteRequest');
     }
@@ -1031,7 +685,6 @@ async function handleFerieSubmit(e) {
     const oggi = new Date();
     oggi.setHours(0, 0, 0);
     
-    // Validazioni
     if (dataInizio < oggi) {
         showFeedback('Errore', 'Non puoi richiedere ferie per date passate');
         return;
@@ -1063,7 +716,6 @@ async function handleFerieSubmit(e) {
         document.getElementById('ferieForm').reset();
         showFeedback('Successo', `Richiesta ferie inviata! ${giorni} giorni richiesti.`);
         await loadRequests();
-        
     } catch (error) {
         handleError(error, 'handleFerieSubmit');
     }
@@ -1103,15 +755,25 @@ async function handleMalattiaSubmit(e) {
         setLoadingState(submitBtn, true);
         
         let attachmentData = null;
-        if (attachmentFile) {
-            try {
-                attachmentData = await uploadAttachment(attachmentFile, 'Malattia');
-                showToast('Certificato caricato con successo', 'success');
-            } catch (uploadError) {
-                showFeedback('Errore', uploadError.message);
-                setLoadingState(submitBtn, false);
-                return;
-            }
+        if (attachmentFile && attachmentFile.type === 'application/pdf' && attachmentFile.size <= 5 * 1024 * 1024) {
+            const reader = new FileReader();
+            attachmentData = await new Promise((resolve, reject) => {
+                reader.onload = function(e) {
+                    resolve({
+                        name: attachmentFile.name,
+                        data: e.target.result,
+                        size: attachmentFile.size,
+                        type: attachmentFile.type,
+                        uploadDate: new Date().toISOString()
+                    });
+                };
+                reader.onerror = reject;
+                reader.readAsDataURL(attachmentFile);
+            });
+        } else if (attachmentFile) {
+            showFeedback('Errore', 'Solo file PDF di max 5MB sono supportati');
+            setLoadingState(submitBtn, false);
+            return;
         }
         
         await db.collection('richieste').add({
@@ -1128,6 +790,8 @@ async function handleMalattiaSubmit(e) {
         });
         
         document.getElementById('malattiaForm').reset();
+        const attachmentInfo = document.getElementById('attachmentInfo');
+        if (attachmentInfo) attachmentInfo.textContent = '';
         showFeedback('Successo', 'Richiesta malattia inviata con successo!');
         await loadRequests();
         
@@ -1138,44 +802,6 @@ async function handleMalattiaSubmit(e) {
         setLoadingState(submitBtn, false);
     }
 }
-
-// Aggiungi campo file al form malattia nell'HTML (aggiungi dopo data certificato)
-function addAttachmentFieldToMalattiaForm() {
-    const malattiaForm = document.getElementById('malattiaForm');
-    if (!malattiaForm) return;
-    
-    const dataCertGroup = document.querySelector('#malattiaForm .form-row:last-child');
-    if (dataCertGroup && !document.getElementById('malattiaAttachment')) {
-        const attachmentGroup = document.createElement('div');
-        attachmentGroup.className = 'form-group file-upload-group';
-        attachmentGroup.innerHTML = `
-            <label class="form-label">Certificato Medico (PDF)</label>
-            <label class="file-upload-label">
-                📎 Seleziona PDF
-                <input type="file" id="malattiaAttachment" class="file-upload-input" accept=".pdf" />
-            </label>
-            <div class="attachment-info" id="attachmentInfo"></div>
-            <small class="form-help">Max 5MB, solo PDF</small>
-        `;
-        
-        dataCertGroup.parentNode.insertBefore(attachmentGroup, dataCertGroup.nextSibling);
-        
-        const fileInput = document.getElementById('malattiaAttachment');
-        const infoDiv = document.getElementById('attachmentInfo');
-        
-        if (fileInput && infoDiv) {
-            fileInput.addEventListener('change', (e) => {
-                if (e.target.files.length > 0) {
-                    infoDiv.textContent = `📄 ${e.target.files[0].name} (${(e.target.files[0].size / 1024).toFixed(1)} KB)`;
-                    infoDiv.style.color = '#27ae60';
-                } else {
-                    infoDiv.textContent = '';
-                }
-            });
-        }
-    }
-}
-
 
 async function handlePermessiSubmit(e) {
     e.preventDefault();
@@ -1229,6 +855,339 @@ async function handlePermessiSubmit(e) {
     }
 }
 
+// ==================== EDIT REQUEST ====================
+async function editRequest(requestId) {
+    console.log('🎯 Modifica richiesta:', requestId);
+    
+    try {
+        const doc = await db.collection('richieste').doc(requestId).get();
+        
+        if (!doc.exists) {
+            showFeedback('Errore', 'Richiesta non trovata');
+            return;
+        }
+        
+        const data = doc.data();
+        
+        if (data.userId !== appState.currentUser.uid) {
+            showFeedback('Errore', 'Non hai i permessi per modificare questa richiesta');
+            return;
+        }
+        
+        if (data.stato !== 'In attesa') {
+            showFeedback('Errore', 'Puoi modificare solo richieste in stato "In attesa"');
+            return;
+        }
+        
+        document.getElementById('editRequestId').value = requestId;
+        document.getElementById('editRequestType').value = data.tipo;
+        
+        document.querySelectorAll('.edit-fields').forEach(field => {
+            field.style.display = 'none';
+        });
+        
+        const infoMessage = document.getElementById('editInfoMessage');
+        if (infoMessage) infoMessage.style.display = 'block';
+        
+        if (data.tipo === 'Ferie') {
+            document.getElementById('editFerieFields').style.display = 'block';
+            const dataInizio = data.dataInizio?.toDate();
+            const dataFine = data.dataFine?.toDate();
+            document.getElementById('editFerieDataInizio').value = dataInizio?.toISOString().split('T')[0] || '';
+            document.getElementById('editFerieDataFine').value = dataFine?.toISOString().split('T')[0] || '';
+            document.getElementById('editFerieGiorni').value = data.giorni || 0;
+        } else if (data.tipo === 'Malattia') {
+            document.getElementById('editMalattiaFields').style.display = 'block';
+            const dataInizio = data.dataInizio?.toDate();
+            const dataFine = data.dataFine?.toDate();
+            const dataCertificato = data.dataCertificato?.toDate();
+            document.getElementById('editMalattiaDataInizio').value = dataInizio?.toISOString().split('T')[0] || '';
+            document.getElementById('editMalattiaDataFine').value = dataFine?.toISOString().split('T')[0] || '';
+            document.getElementById('editMalattiaNumeroCertificato').value = data.numeroCertificato || '';
+            document.getElementById('editMalattiaDataCertificato').value = dataCertificato?.toISOString().split('T')[0] || '';
+        } else if (data.tipo === 'Permesso') {
+            document.getElementById('editPermessiFields').style.display = 'block';
+            const dataPermesso = data.data?.toDate();
+            document.getElementById('editPermessiData').value = dataPermesso?.toISOString().split('T')[0] || '';
+            document.getElementById('editPermessiOraInizio').value = data.oraInizio || '';
+            document.getElementById('editPermessiOraFine').value = data.oraFine || '';
+            document.getElementById('editPermessiMotivazione').value = data.motivazione || '';
+        }
+        
+        const dialog = document.getElementById('editRequestDialog');
+        if (dialog) dialog.showModal();
+        
+    } catch (error) {
+        console.error('Errore modifica:', error);
+        showFeedback('Errore', 'Impossibile caricare la richiesta da modificare');
+    }
+}
+
+async function handleEditRequestSubmit(e) {
+    e.preventDefault();
+    
+    const requestId = document.getElementById('editRequestId').value;
+    const requestType = document.getElementById('editRequestType').value;
+    
+    if (!requestId) {
+        showFeedback('Errore', 'ID richiesta non valido');
+        return;
+    }
+    
+    try {
+        let updateData = {
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+            updatedBy: appState.currentUser.uid,
+            updatedByName: appState.currentUserData.name,
+            stato: 'In attesa'
+        };
+        
+        if (requestType === 'Ferie') {
+            const dataInizio = new Date(document.getElementById('editFerieDataInizio').value);
+            const dataFine = new Date(document.getElementById('editFerieDataFine').value);
+            const oggi = new Date();
+            oggi.setHours(0, 0, 0);
+            
+            if (dataInizio < oggi) {
+                showFeedback('Errore', 'Non puoi modificare con date passate');
+                return;
+            }
+            if (dataFine < dataInizio) {
+                showFeedback('Errore', 'La data di fine non può essere precedente alla data di inizio');
+                return;
+            }
+            
+            const giorni = calcolaGiorniLavorativi(dataInizio, dataFine);
+            if (giorni <= 0) {
+                showFeedback('Errore', 'Nessun giorno lavorativo nel periodo');
+                return;
+            }
+            
+            updateData.dataInizio = firebase.firestore.Timestamp.fromDate(dataInizio);
+            updateData.dataFine = firebase.firestore.Timestamp.fromDate(dataFine);
+            updateData.giorni = giorni;
+            
+        } else if (requestType === 'Malattia') {
+            const dataInizio = new Date(document.getElementById('editMalattiaDataInizio').value);
+            const dataFine = new Date(document.getElementById('editMalattiaDataFine').value);
+            const numeroCertificato = document.getElementById('editMalattiaNumeroCertificato').value.trim();
+            const dataCertificato = new Date(document.getElementById('editMalattiaDataCertificato').value);
+            
+            if (dataFine < dataInizio) {
+                showFeedback('Errore', 'La data di fine non può essere precedente alla data di inizio');
+                return;
+            }
+            if (!numeroCertificato) {
+                showFeedback('Errore', 'Il numero del certificato è obbligatorio');
+                return;
+            }
+            
+            updateData.dataInizio = firebase.firestore.Timestamp.fromDate(dataInizio);
+            updateData.dataFine = firebase.firestore.Timestamp.fromDate(dataFine);
+            updateData.numeroCertificato = sanitizeInput(numeroCertificato);
+            updateData.dataCertificato = firebase.firestore.Timestamp.fromDate(dataCertificato);
+            
+        } else if (requestType === 'Permesso') {
+            const data = new Date(document.getElementById('editPermessiData').value);
+            const oraInizio = document.getElementById('editPermessiOraInizio').value;
+            const oraFine = document.getElementById('editPermessiOraFine').value;
+            const motivazione = document.getElementById('editPermessiMotivazione').value.trim();
+            const oggi = new Date();
+            oggi.setHours(0, 0, 0);
+            
+            if (data < oggi) {
+                showFeedback('Errore', 'Non puoi modificare con una data passata');
+                return;
+            }
+            if (!oraInizio || !oraFine) {
+                showFeedback('Errore', 'Le ore di inizio e fine sono obbligatorie');
+                return;
+            }
+            if (oraInizio >= oraFine) {
+                showFeedback('Errore', 'L\'ora di fine deve essere successiva all\'ora di inizio');
+                return;
+            }
+            
+            updateData.data = firebase.firestore.Timestamp.fromDate(data);
+            updateData.oraInizio = oraInizio;
+            updateData.oraFine = oraFine;
+            updateData.motivazione = sanitizeInput(motivazione) || '';
+        }
+        
+        await db.collection('richieste').doc(requestId).update(updateData);
+        
+        const dialog = document.getElementById('editRequestDialog');
+        if (dialog) dialog.close();
+        
+        showFeedback('Successo', '✅ Richiesta modificata con successo!');
+        await loadRequests();
+        
+    } catch (error) {
+        console.error('Errore modifica:', error);
+        showFeedback('Errore', 'Errore durante la modifica: ' + error.message);
+    }
+}
+
+function initializeEditModal() {
+    const editForm = document.getElementById('editRequestForm');
+    const closeBtn = document.getElementById('closeEditRequest');
+    const editDialog = document.getElementById('editRequestDialog');
+    
+    if (editForm) {
+        editForm.removeEventListener('submit', handleEditRequestSubmit);
+        editForm.addEventListener('submit', handleEditRequestSubmit);
+    }
+    
+    if (closeBtn) {
+        closeBtn.removeEventListener('click', () => {
+            if (editDialog) editDialog.close();
+        });
+        closeBtn.addEventListener('click', () => {
+            if (editDialog) editDialog.close();
+        });
+    }
+    
+    if (editDialog) {
+        editDialog.addEventListener('click', (e) => {
+            if (e.target === editDialog) editDialog.close();
+        });
+    }
+}
+
+function setupEditDialogReset() {
+    const dialog = document.getElementById('editRequestDialog');
+    if (dialog) {
+        dialog.addEventListener('close', () => {
+            document.querySelectorAll('.edit-fields').forEach(field => {
+                field.style.display = 'none';
+            });
+        });
+    }
+}
+
+// ==================== PASSWORD MANAGEMENT ====================
+async function handleChangePassword(e) {
+    e.preventDefault();
+    
+    const currentPassword = document.getElementById('currentPassword')?.value;
+    const newPassword = document.getElementById('newPassword')?.value;
+    const confirmPassword = document.getElementById('confirmPassword')?.value;
+    
+    const currentValidation = validatePassword(currentPassword);
+    if (!currentValidation.isValid) {
+        showFeedback('Errore', currentValidation.errors[0]);
+        return;
+    }
+    
+    const newValidation = validatePassword(newPassword, true);
+    if (!newValidation.isValid) {
+        showFeedback('Errore', newValidation.errors.join('\n'));
+        return;
+    }
+    
+    if (newPassword !== confirmPassword) {
+        showFeedback('Errore', 'Le nuove password non coincidono');
+        return;
+    }
+    
+    if (newPassword === currentPassword) {
+        showFeedback('Errore', 'La nuova password deve essere diversa da quella attuale');
+        return;
+    }
+    
+    try {
+        const submitBtn = e.target.querySelector('button[type="submit"]');
+        setLoadingState(submitBtn, true);
+        
+        const user = auth.currentUser;
+        if (!user) throw new Error('Utente non autenticato');
+        
+        const credential = firebase.auth.EmailAuthProvider.credential(user.email, currentPassword);
+        await user.reauthenticateWithCredential(credential);
+        await user.updatePassword(newPassword);
+        
+        await db.collection('users').doc(user.uid).update({
+            temporaryPassword: false,
+            passwordUpdatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        
+        if (appState.currentUserData) {
+            appState.currentUserData.temporaryPassword = false;
+        }
+        
+        const dialog = document.getElementById('changePasswordDialog');
+        if (dialog) dialog.close();
+        
+        showFeedback('Successo', 'Password cambiata con successo!');
+        
+        const passwordSection = document.getElementById('passwordSection');
+        if (passwordSection) passwordSection.style.display = 'none';
+        
+        e.target.reset();
+        
+    } catch (error) {
+        console.error('Change password error:', error);
+        let errorMessage = 'Errore durante il cambio password';
+        if (error.code === 'auth/wrong-password') {
+            errorMessage = 'Password attuale non corretta';
+        } else if (error.code === 'auth/weak-password') {
+            errorMessage = 'La nuova password è troppo debole';
+        }
+        showFeedback('Errore', errorMessage);
+    } finally {
+        const submitBtn = e.target.querySelector('button[type="submit"]');
+        setLoadingState(submitBtn, false);
+    }
+}
+
+function initPasswordStrengthChecker() {
+    const newPasswordInput = document.getElementById('newPassword');
+    if (!newPasswordInput) return;
+    
+    const strengthEl = document.getElementById('passwordStrength');
+    
+    newPasswordInput.addEventListener('input', (e) => {
+        const strength = checkPasswordStrength(e.target.value);
+        if (strengthEl) {
+            if (e.target.value.length === 0) {
+                strengthEl.textContent = '';
+                strengthEl.className = 'password-strength';
+                return;
+            }
+            strengthEl.textContent = `Forza password: ${strength.label}`;
+            strengthEl.className = `password-strength ${strength.className}`;
+        }
+    });
+}
+
+function showPasswordSectionIfNeeded() {
+    const passwordSection = document.getElementById('passwordSection');
+    const isAdmin = appState.isAdmin;
+    const hasTemporaryPassword = appState.currentUserData?.temporaryPassword === true;
+    const shouldShow = !isAdmin && hasTemporaryPassword;
+    
+    if (passwordSection) {
+        passwordSection.style.display = shouldShow ? 'block' : 'none';
+        if (shouldShow) {
+            announceToScreenReader('Attenzione: la tua password è temporanea. Cambiala per maggiore sicurezza.');
+        }
+    }
+}
+
+function initPasswordToggle() {
+    const toggleBtn = document.getElementById('togglePassword');
+    const passwordInput = document.getElementById('password');
+    
+    if (toggleBtn && passwordInput) {
+        toggleBtn.addEventListener('click', () => {
+            const type = passwordInput.type === 'password' ? 'text' : 'password';
+            passwordInput.type = type;
+            toggleBtn.textContent = type === 'password' ? '👁️' : '🔒';
+            toggleBtn.setAttribute('aria-pressed', type === 'text');
+        });
+    }
+}
+
 // ==================== ADMIN FUNCTIONS ====================
 async function registerEmployee() {
     const name = prompt("Nome completo del dipendente:");
@@ -1257,13 +1216,9 @@ async function registerEmployee() {
         const submitBtn = document.getElementById('registerEmployeeBtn');
         setLoadingState(submitBtn, true);
         
-        // Crea utente Firebase
         const userCredential = await auth.createUserWithEmailAndPassword(email, CONSTANTS.TEMP_PASSWORD);
-        
-        // Aggiorna profilo
         await userCredential.user.updateProfile({ displayName: name.trim() });
         
-        // Crea documento Firestore
         await db.collection('users').doc(userCredential.user.uid).set({
             name: name.trim(),
             email: email,
@@ -1275,16 +1230,8 @@ async function registerEmployee() {
             createdByName: appState.currentUserData.name
         });
         
-        showFeedback(
-            'Successo',
-            `✅ Dipendente registrato con successo!<br><br>` +
-            `📧 Email: ${escapeHtml(email)}<br>` +
-            `🔑 Password temporanea: ${CONSTANTS.TEMP_PASSWORD}<br><br>` +
-            `⚠️ Il dipendente dovrà cambiare password al primo accesso.`,
-            true
-        );
+        showFeedback('Successo', `✅ Dipendente registrato!<br><br>📧 Email: ${escapeHtml(email)}<br>🔑 Password: ${CONSTANTS.TEMPASSWORD}`, true);
         
-        // Ricarica lista se visibile
         const employeesList = document.getElementById('employeesList');
         if (employeesList?.style.display === 'block') {
             await loadEmployeesList();
@@ -1292,17 +1239,7 @@ async function registerEmployee() {
         
     } catch (error) {
         console.error('Register error:', error);
-        
-        let errorMessage = '';
-        if (error.code === 'auth/email-already-in-use') {
-            errorMessage = 'Questa email è già registrata. Usa un\'altra email o recupera l\'account esistente.';
-        } else if (error.code === 'permission-denied') {
-            errorMessage = 'Errore di permessi. Verifica le regole di sicurezza Firestore.';
-        } else {
-            errorMessage = error.message;
-        }
-        
-        showFeedback('Errore', errorMessage);
+        showFeedback('Errore', error.code === 'auth/email-already-in-use' ? 'Email già registrata' : error.message);
     } finally {
         const submitBtn = document.getElementById('registerEmployeeBtn');
         setLoadingState(submitBtn, false);
@@ -1313,26 +1250,14 @@ async function loadEmployeesList() {
     const employeesBody = document.getElementById('employeesBody');
     if (!employeesBody) return;
     
-    // Skeleton loading
-    employeesBody.innerHTML = `
-        <tr><td colspan="6">
-            <div class="skeleton" style="height: 40px; margin: 8px 0;"></div>
-            <div class="skeleton" style="height: 40px; margin: 8px 0;"></div>
-            <div class="skeleton" style="height: 40px; margin: 8px 0;"></div>
-        </td></tr>
-    `;
+    employeesBody.innerHTML = `<tr><td colspan="6">Caricamento...</td></tr>`;
     
     try {
-        const snapshot = await db.collection('users')
-            .orderBy('name')
-            .get();
+        const snapshot = await db.collection('users').orderBy('name').get();
         
         appState.allEmployees = [];
         snapshot.forEach(doc => {
-            appState.allEmployees.push({
-                id: doc.id,
-                ...doc.data()
-            });
+            appState.allEmployees.push({ id: doc.id, ...doc.data() });
         });
         
         appState.totalEmployees = appState.allEmployees.length;
@@ -1341,11 +1266,7 @@ async function loadEmployeesList() {
         
     } catch (error) {
         handleError(error, 'loadEmployeesList');
-        employeesBody.innerHTML = `
-             hilab<td colspan="6" class="error text-center">
-                Errore nel caricamento dei dipendenti
-             </td></tr>
-        `;
+        employeesBody.innerHTML = `<tr><td colspan="6" class="error">Errore nel caricamento</td></tr>`;
     }
 }
 
@@ -1354,15 +1275,12 @@ function renderEmployeesPage() {
     if (!employeesBody) return;
     
     const start = (appState.employeesPage - 1) * appState.employeesPageSize;
-    const end = start + appState.employeesPageSize;
-    const pageEmployees = appState.allEmployees.slice(start, end);
+    const pageEmployees = appState.allEmployees.slice(start, start + appState.employeesPageSize);
     
     employeesBody.innerHTML = '';
     
     if (pageEmployees.length === 0) {
-        employeesBody.innerHTML = `
-            <tr><td colspan="6" class="text-center">Nessun dipendente trovato</td></tr>
-        `;
+        employeesBody.innerHTML = `<tr><td colspan="6" class="text-center">Nessun dipendente trovato</td></tr>`;
         return;
     }
     
@@ -1374,29 +1292,21 @@ function renderEmployeesPage() {
         if (isCurrentUser) row.classList.add('current-user');
         
         row.innerHTML = `
-            <td data-label="Nome">${escapeHtml(employee.name || 'N/D')}</td>
-            <td data-label="Email">${escapeHtml(employee.email || '')}</td>
-            <td data-label="Ruolo">
+            <td>${escapeHtml(employee.name || 'N/D')}</td>
+            <td>${escapeHtml(employee.email || '')}</td>
+            <td>
                 <select class="role-select form-control" data-id="${employee.id}" ${isCurrentUser ? 'disabled' : ''}>
                     <option value="dipendente" ${employee.role === 'dipendente' ? 'selected' : ''}>Dipendente</option>
                     <option value="admin" ${employee.role === 'admin' ? 'selected' : ''}>Admin</option>
                 </select>
             </td>
-            <td data-label="Data Registrazione">${createdAt.toLocaleDateString('it-IT')}</td>
-            <td data-label="Stato Password">
-                ${employee.temporaryPassword ? 
-                    '<span class="status-badge rifiutato">⚠️ Temporanea</span>' : 
-                    '<span class="status-badge approvato">✓ Definitiva</span>'}
-            </td>
-            <td data-label="Azioni" class="actions-cell">
+            <td>${createdAt.toLocaleDateString('it-IT')}</td>
+            <td>${employee.temporaryPassword ? '<span class="status-badge rifiutato">⚠️ Temporanea</span>' : '<span class="status-badge approvato">✓ Definitiva</span>'}</td>
+            <td class="actions-cell">
                 ${!isCurrentUser ? `
-                    <button class="btn-small reset-password" data-email="${escapeHtml(employee.email)}" data-name="${escapeHtml(employee.name)}">
-                        🔄 Reset Password
-                    </button>
-                    <button class="btn-small btn-danger delete-employee" data-id="${employee.id}" data-name="${escapeHtml(employee.name)}">
-                        🗑️ Elimina
-                    </button>
-                ` : '<span class="text-muted">(Utente corrente)</span>'}
+                    <button class="btn-small reset-password" data-email="${escapeHtml(employee.email)}">🔄 Reset</button>
+                    <button class="btn-small btn-danger delete-employee" data-id="${employee.id}" data-name="${escapeHtml(employee.name)}">🗑️</button>
+                ` : '<span class="text-muted">Utente corrente</span>'}
             </td>
         `;
         
@@ -1406,23 +1316,13 @@ function renderEmployeesPage() {
             const deleteBtn = row.querySelector('.delete-employee');
             
             if (roleSelect) {
-                roleSelect.addEventListener('change', () => {
-                    updateEmployeeRole(employee.id, roleSelect.value);
-                });
+                roleSelect.addEventListener('change', () => updateEmployeeRole(employee.id, roleSelect.value));
             }
-            
             if (resetBtn) {
-                resetBtn.addEventListener('click', () => {
-                    const email = resetBtn.getAttribute('data-email');
-                    if (email) resetEmployeePassword(email);
-                });
+                resetBtn.addEventListener('click', () => resetEmployeePassword(resetBtn.getAttribute('data-email')));
             }
-            
             if (deleteBtn) {
-                deleteBtn.addEventListener('click', () => {
-                    const name = deleteBtn.getAttribute('data-name');
-                    deleteEmployee(employee.id, name);
-                });
+                deleteBtn.addEventListener('click', () => deleteEmployee(employee.id, deleteBtn.getAttribute('data-name')));
             }
         }
         
@@ -1431,135 +1331,65 @@ function renderEmployeesPage() {
 }
 
 async function updateEmployeeRole(userId, newRole) {
-    showConfirmation(
-        'Cambio Ruolo',
-        `Sei sicuro di voler cambiare il ruolo a "${newRole}"?`,
-        async () => {
-            try {
-                await db.collection('users').doc(userId).update({
-                    role: newRole,
-                    updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
-                    updatedBy: appState.currentUser?.uid
-                });
-                
-                showFeedback('Successo', 'Ruolo aggiornato con successo!');
-                await loadEmployeesList();
-                
-                // Aggiorna UI se è l'utente corrente
-                if (appState.currentUser && appState.currentUser.uid === userId) {
-                    appState.currentUserData.role = newRole;
-                    appState.isAdmin = newRole === 'admin';
-                    setupUI();
-                }
-                
-            } catch (error) {
-                handleError(error, 'updateEmployeeRole');
+    showConfirmation('Cambio Ruolo', `Sei sicuro di voler cambiare il ruolo a "${newRole}"?`, async () => {
+        try {
+            await db.collection('users').doc(userId).update({ role: newRole });
+            showFeedback('Successo', 'Ruolo aggiornato!');
+            await loadEmployeesList();
+            if (appState.currentUser && appState.currentUser.uid === userId) {
+                appState.currentUserData.role = newRole;
+                appState.isAdmin = newRole === 'admin';
+                setupUI();
             }
+        } catch (error) {
+            handleError(error, 'updateEmployeeRole');
         }
-    );
+    });
 }
 
 async function resetEmployeePassword(email) {
-    if (!email) {
-        showFeedback('Errore', 'Email non valida');
-        return;
-    }
-    
-    showConfirmation(
-        'Reset Password',
-        `⚠️ RESET PASSWORD ⚠️\n\n` +
-        `Dipendente: ${email}\n\n` +
-        `La nuova password temporanea sarà: ${CONSTANTS.TEMP_PASSWORD}\n\n` +
-        `Il dipendente dovrà cambiarla al prossimo accesso.\n\n` +
-        `Procedere?`,
-        async () => {
-            try {
-                // Invia email di reset Firebase
-                await auth.sendPasswordResetEmail(email);
-                
-                // Aggiorna Firestore
-                const usersSnapshot = await db.collection('users').where('email', '==', email).get();
-                
-                if (!usersSnapshot.empty) {
-                    const userDoc = usersSnapshot.docs[0];
-                    await db.collection('users').doc(userDoc.id).update({
-                        temporaryPassword: true,
-                        passwordResetAt: firebase.firestore.FieldValue.serverTimestamp(),
-                        passwordResetBy: appState.currentUser?.email,
-                        passwordResetByName: appState.currentUserData?.name
-                    });
-                }
-                
-                showFeedback(
-                    '✅ Reset Password Inviato',
-                    `Email di reset inviata a: ${email}\n\n` +
-                    `🔑 PASSWORD TEMPORANEA: ${CONSTANTS.TEMP_PASSWORD}\n\n` +
-                    `📌 ISTRUZIONI:\n` +
-                    `1. Controlla l'email (anche nello spam)\n` +
-                    `2. Clicca sul link ricevuto\n` +
-                    `3. Usa la password temporanea\n` +
-                    `4. Imposta una nuova password personale`,
-                    true
-                );
-                
-                // Ricarica lista
-                setTimeout(() => {
-                    if (document.getElementById('employeesList')?.style.display === 'block') {
-                        loadEmployeesList();
-                    }
-                }, 1500);
-                
-            } catch (error) {
-                handleError(error, 'resetEmployeePassword');
+    showConfirmation('Reset Password', `Reset password per ${email}? La password temporanea sarà: ${CONSTANTS.TEMP_PASSWORD}`, async () => {
+        try {
+            await auth.sendPasswordResetEmail(email);
+            const usersSnapshot = await db.collection('users').where('email', '==', email).get();
+            if (!usersSnapshot.empty) {
+                await db.collection('users').doc(usersSnapshot.docs[0].id).update({ temporaryPassword: true });
             }
+            showFeedback('Successo', `Email di reset inviata a ${email}`);
+        } catch (error) {
+            handleError(error, 'resetEmployeePassword');
         }
-    );
+    });
 }
 
 async function deleteEmployee(userId, name) {
-    showConfirmation(
-        'Elimina Dipendente',
-        `⚠️ OPERAZIONE IRREVERSIBILE ⚠️\n\n` +
-        `Stai per eliminare: ${name}\n\n` +
-        `Tutte le richieste associate verranno eliminate definitivamente.\n\n` +
-        `Sei assolutamente sicuro?`,
-        async () => {
-            try {
-                // Elimina tutte le richieste del dipendente
-                const requests = await db.collection('richieste').where('userId', '==', userId).get();
-                const batch = db.batch();
-                
-                requests.forEach(doc => batch.delete(doc.ref));
-                batch.delete(db.collection('users').doc(userId));
-                
-                await batch.commit();
-                
-                showFeedback('Successo', `Dipendente "${name}" eliminato con successo`);
-                await loadEmployeesList();
-                
-            } catch (error) {
-                handleError(error, 'deleteEmployee');
-            }
+    showConfirmation('Elimina Dipendente', `Eliminare ${name} e tutte le sue richieste?`, async () => {
+        try {
+            const requests = await db.collection('richieste').where('userId', '==', userId).get();
+            const batch = db.batch();
+            requests.forEach(doc => batch.delete(doc.ref));
+            batch.delete(db.collection('users').doc(userId));
+            await batch.commit();
+            showFeedback('Successo', `Dipendente eliminato`);
+            await loadEmployeesList();
+        } catch (error) {
+            handleError(error, 'deleteEmployee');
         }
-    );
+    });
 }
 
 function toggleEmployeesList() {
     const employeesList = document.getElementById('employeesList');
     const showBtn = document.getElementById('showEmployeesBtn');
     
-    if (!employeesList) return;
-    
-    const isVisible = employeesList.style.display === 'block';
-    employeesList.style.display = isVisible ? 'none' : 'block';
-    
-    if (showBtn) {
-        showBtn.setAttribute('aria-expanded', (!isVisible).toString());
-    }
-    
-    if (!isVisible) {
-        appState.employeesPage = 1;
-        loadEmployeesList();
+    if (employeesList) {
+        const isVisible = employeesList.style.display === 'block';
+        employeesList.style.display = isVisible ? 'none' : 'block';
+        if (showBtn) showBtn.setAttribute('aria-expanded', (!isVisible).toString());
+        if (!isVisible) {
+            appState.employeesPage = 1;
+            loadEmployeesList();
+        }
     }
 }
 
@@ -1571,15 +1401,10 @@ function updatePagination() {
     const nextPage = document.getElementById('nextPage');
     const paginationControls = document.getElementById('paginationControls');
     
-    if (pageInfo) {
-        pageInfo.textContent = `Pagina ${appState.currentPage} di ${total || 1}`;
-    }
-    
+    if (pageInfo) pageInfo.textContent = `Pagina ${appState.currentPage} di ${total || 1}`;
     if (prevPage) prevPage.disabled = appState.currentPage <= 1;
     if (nextPage) nextPage.disabled = appState.currentPage >= total;
-    if (paginationControls) {
-        paginationControls.style.display = total > 1 ? 'flex' : 'none';
-    }
+    if (paginationControls) paginationControls.style.display = total > 1 ? 'flex' : 'none';
 }
 
 function goToPreviousPage() {
@@ -1604,16 +1429,10 @@ function updateEmployeesPagination() {
     const nextPage = document.getElementById('nextEmployeesPage');
     const pagination = document.getElementById('employeesPagination');
     
-    if (pageInfo) {
-        pageInfo.textContent = `Pagina ${appState.employeesPage} di ${totalPages || 1}`;
-    }
-    
+    if (pageInfo) pageInfo.textContent = `Pagina ${appState.employeesPage} di ${totalPages || 1}`;
     if (prevPage) prevPage.disabled = appState.employeesPage <= 1;
     if (nextPage) nextPage.disabled = appState.employeesPage >= totalPages;
-    
-    if (pagination) {
-        pagination.style.display = totalPages > 1 ? 'flex' : 'none';
-    }
+    if (pagination) pagination.style.display = totalPages > 1 ? 'flex' : 'none';
 }
 
 function goToPrevEmployeesPage() {
@@ -1621,9 +1440,6 @@ function goToPrevEmployeesPage() {
         appState.employeesPage--;
         renderEmployeesPage();
         updateEmployeesPagination();
-        
-        const employeesList = document.getElementById('employeesList');
-        employeesList?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
 }
 
@@ -1633,9 +1449,6 @@ function goToNextEmployeesPage() {
         appState.employeesPage++;
         renderEmployeesPage();
         updateEmployeesPagination();
-        
-        const employeesList = document.getElementById('employeesList');
-        employeesList?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
 }
 
@@ -1712,7 +1525,6 @@ function exportToPDF() {
         
         doc.save(`richieste_${new Date().toISOString().slice(0, 10)}.pdf`);
         showToast('PDF generato con successo', 'success');
-        
     } catch (error) {
         handleError(error, 'exportToPDF');
     }
@@ -1740,10 +1552,7 @@ function exportToExcel() {
             return;
         }
         
-        const csv = rows.map(r => 
-            r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')
-        ).join('\n');
-        
+        const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
         const blob = new Blob(["\uFEFF" + csv], { type: 'text/csv;charset=utf-8;' });
         const link = document.createElement('a');
         const url = URL.createObjectURL(blob);
@@ -1755,111 +1564,118 @@ function exportToExcel() {
         document.body.removeChild(link);
         URL.revokeObjectURL(url);
         
-        showToast('Esportazione completata con successo', 'success');
-        
+        showToast('Esportazione completata', 'success');
     } catch (error) {
         handleError(error, 'exportToExcel');
     }
 }
 
 // ==================== UI SETUP ====================
-// Versione corretta di setupUIWithCalendar (senza ricorsione)
-// Versione CORRETTA di setupUIWithCalendar (SENZA ricorsione)
-function setupUIWithCalendar() {
-    console.log('🎯 setupUIWithCalendar chiamata');
+function setupUI() {
+    console.log('🎯 setupUI chiamata');
     
     const userData = appState.currentUserData;
     const isAdmin = appState.isAdmin;
     
     if (!userData) {
-        console.error('❌ userData non disponibile');
+        console.error('userData non disponibile');
         return;
     }
     
-    // Mostra nome utente
     const loggedInUser = document.getElementById('loggedInUser');
     if (loggedInUser) {
         loggedInUser.textContent = `${escapeHtml(userData.name)}${isAdmin ? ' (Admin)' : ''}`;
     }
     
-    // Mostra/nascondi controlli admin
     const adminControls = document.getElementById('adminControls');
     if (adminControls) {
         adminControls.style.display = isAdmin ? 'block' : 'none';
     }
     
-    // Mostra/nascondi form richieste
     const requestForms = document.getElementById('requestForms');
     if (requestForms) {
         requestForms.style.display = isAdmin ? 'none' : 'block';
     }
     
-    // Mostra sezione cambio password se necessaria
-    if (typeof showPasswordSectionIfNeeded === 'function') {
-        showPasswordSectionIfNeeded();
-    }
+    showPasswordSectionIfNeeded();
     
-    // Imposta nome nei form
     const nameFields = ['ferieNome', 'malattiaNome', 'permessiNome'];
     nameFields.forEach(id => {
         const field = document.getElementById(id);
         if (field) field.value = userData.name;
     });
     
-    // Mostra app principale
     const loginContainer = document.getElementById('loginContainer');
     const mainContainer = document.getElementById('mainContainer');
     if (loginContainer) loginContainer.style.display = 'none';
     if (mainContainer) mainContainer.style.display = 'block';
     
-    // Carica richieste
-    if (typeof loadRequests === 'function') {
-        loadRequests();
-    }
+    loadRequests();
+    setupRealtimeListener();
     
-    // Setup realtime listener
-    if (typeof setupRealtimeListener === 'function') {
-        setupRealtimeListener();
-    }
+    // Aggiungi campo allegato al form malattia
+    addAttachmentFieldToMalattiaForm();
     
-    // MOSTRA CALENDARIO (solo admin)
+    // Mostra calendario per admin
     const calendarSection = document.getElementById('calendarSection');
     if (calendarSection) {
         if (isAdmin) {
             calendarSection.style.display = 'block';
-            if (typeof loadCalendarData === 'function') {
-                loadCalendarData();
-            }
-            if (typeof initNotifications === 'function') {
-                initNotifications();
-            }
+            if (typeof loadCalendarData === 'function') loadCalendarData();
+            if (typeof initNotifications === 'function') initNotifications();
         } else {
             calendarSection.style.display = 'none';
         }
     }
     
-    // Aggiungi campo allegato al form malattia (solo se non admin)
-    if (!isAdmin && typeof addAttachmentFieldToMalattiaForm === 'function') {
-        addAttachmentFieldToMalattiaForm();
-    }
-    
-    if (typeof announceToScreenReader === 'function') {
-        announceToScreenReader(`Accesso effettuato come ${userData.name}`);
-    }
-    
-    console.log('✅ setupUIWithCalendar completata');
-}
-// Aggiungi event listener per calendario
-function initCalendarEvents() {
-    const prevMonthBtn = document.getElementById('prevMonth');
-    const nextMonthBtn = document.getElementById('nextMonth');
-    const todayBtn = document.getElementById('todayBtn');
-    
-    if (prevMonthBtn) prevMonthBtn.addEventListener('click', () => changeMonth(-1));
-    if (nextMonthBtn) nextMonthBtn.addEventListener('click', () => changeMonth(1));
-    if (todayBtn) todayBtn.addEventListener('click', goToToday);
+    announceToScreenReader(`Accesso effettuato come ${userData.name}`);
 }
 
+function addAttachmentFieldToMalattiaForm() {
+    const malattiaForm = document.getElementById('malattiaForm');
+    if (!malattiaForm) return;
+    
+    // Evita duplicati
+    if (document.getElementById('malattiaAttachment')) return;
+    
+    const dataCertGroup = document.querySelector('#malattiaForm .form-row:last-child');
+    if (dataCertGroup) {
+        const attachmentGroup = document.createElement('div');
+        attachmentGroup.className = 'form-group file-upload-group';
+        attachmentGroup.innerHTML = `
+            <label class="form-label">Certificato Medico (PDF)</label>
+            <label class="file-upload-label">
+                📎 Seleziona PDF
+                <input type="file" id="malattiaAttachment" class="file-upload-input" accept=".pdf" />
+            </label>
+            <div class="attachment-info" id="attachmentInfo"></div>
+            <small class="form-help">Max 5MB, solo PDF</small>
+        `;
+        
+        dataCertGroup.parentNode.insertBefore(attachmentGroup, dataCertGroup.nextSibling);
+        
+        const fileInput = document.getElementById('malattiaAttachment');
+        const infoDiv = document.getElementById('attachmentInfo');
+        
+        if (fileInput && infoDiv) {
+            fileInput.addEventListener('change', (e) => {
+                if (e.target.files.length > 0) {
+                    const file = e.target.files[0];
+                    if (file.type === 'application/pdf' && file.size <= 5 * 1024 * 1024) {
+                        infoDiv.textContent = `📄 ${file.name} (${(file.size / 1024).toFixed(1)} KB)`;
+                        infoDiv.style.color = '#27ae60';
+                    } else {
+                        infoDiv.textContent = '❌ File non valido (max 5MB, PDF)';
+                        infoDiv.style.color = '#e74c3c';
+                        fileInput.value = '';
+                    }
+                } else {
+                    infoDiv.textContent = '';
+                }
+            });
+        }
+    }
+}
 
 function setupRealtimeListener() {
     if (appState.realtimeListener) {
@@ -1873,20 +1689,6 @@ function setupRealtimeListener() {
     }
     
     appState.realtimeListener = query.onSnapshot((snapshot) => {
-        snapshot.docChanges().forEach((change) => {
-            if (change.type === 'modified') {
-                const data = change.doc.data();
-                const oldData = change.doc.data();
-                
-                if (oldData.stato !== data.stato) {
-                    const message = `La richiesta ${data.tipo} è stata ${data.stato.toLowerCase()}`;
-                    announceToScreenReader(message);
-                    showToast(message, data.stato === 'Approvato' ? 'success' : 
-                                   data.stato === 'Rifiutato' ? 'error' : 'info');
-                }
-            }
-        });
-        
         if (appState.currentUser) {
             loadRequests();
         }
@@ -1895,27 +1697,275 @@ function setupRealtimeListener() {
     });
 }
 
+// ==================== CALENDARIO ASSENZE ====================
+async function loadCalendarData() {
+    if (!appState.isAdmin) return;
+    
+    try {
+        const year = currentCalendarDate.getFullYear();
+        const month = currentCalendarDate.getMonth();
+        
+        const snapshot = await db.collection('richieste')
+            .where('stato', '==', 'Approvato')
+            .get();
+        
+        allAbsences = [];
+        snapshot.forEach(doc => {
+            const data = doc.data();
+            
+            if (data.tipo === 'Permesso') {
+                const date = data.data?.toDate();
+                if (date && date.getMonth() === month && date.getFullYear() === year) {
+                    allAbsences.push({
+                        date: date,
+                        type: data.tipo,
+                        userName: data.userName,
+                        details: `${data.oraInizio}-${data.oraFine}`,
+                        requestId: doc.id
+                    });
+                }
+            } else if (data.tipo === 'Ferie' || data.tipo === 'Malattia') {
+                const start = data.dataInizio?.toDate();
+                const end = data.dataFine?.toDate();
+                if (start && end) {
+                    let current = new Date(start);
+                    while (current <= end) {
+                        if (current.getMonth() === month && current.getFullYear() === year) {
+                            const dayOfWeek = current.getDay();
+                            if (dayOfWeek !== 0 && dayOfWeek !== 6) {
+                                allAbsences.push({
+                                    date: new Date(current),
+                                    type: data.tipo,
+                                    userName: data.userName,
+                                    details: data.tipo === 'Malattia' ? 
+                                        `Cert. ${data.numeroCertificato || 'N/D'}` : 
+                                        `${data.giorni || 1} giorni`,
+                                    requestId: doc.id,
+                                    attachment: data.attachment || null
+                                });
+                            }
+                        }
+                        current.setDate(current.getDate() + 1);
+                    }
+                }
+            }
+        });
+        
+        renderCalendar();
+        checkTodayAbsences();
+        
+    } catch (error) {
+        console.error('Errore caricamento calendario:', error);
+    }
+}
+
+function renderCalendar() {
+    const year = currentCalendarDate.getFullYear();
+    const month = currentCalendarDate.getMonth();
+    
+    const firstDay = new Date(year, month, 1);
+    const lastDay = new Date(year, month + 1, 0);
+    const startDayOfWeek = firstDay.getDay();
+    
+    const daysInMonth = lastDay.getDate();
+    const daysFromPrevMonth = startDayOfWeek === 0 ? 6 : startDayOfWeek - 1;
+    
+    const calendarGrid = document.getElementById('calendarGrid');
+    if (!calendarGrid) return;
+    
+    const monthNames = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 
+                        'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'];
+    const currentMonthSpan = document.getElementById('currentMonthYear');
+    if (currentMonthSpan) {
+        currentMonthSpan.textContent = `${monthNames[month]} ${year}`;
+    }
+    
+    const weekDays = ['Lun', 'Mar', 'Mer', 'Gio', 'Ven', 'Sab', 'Dom'];
+    calendarGrid.innerHTML = weekDays.map(day => 
+        `<div class="calendar-weekday">${day}</div>`
+    ).join('');
+    
+    // Giorni mese precedente
+    const prevMonthDate = new Date(year, month, 0);
+    const prevMonthDays = prevMonthDate.getDate();
+    for (let i = daysFromPrevMonth - 1; i >= 0; i--) {
+        const dayNum = prevMonthDays - i;
+        const date = new Date(year, month - 1, dayNum);
+        calendarGrid.appendChild(createCalendarDay(date, dayNum, true));
+    }
+    
+    // Giorni mese corrente
+    for (let i = 1; i <= daysInMonth; i++) {
+        const date = new Date(year, month, i);
+        calendarGrid.appendChild(createCalendarDay(date, i, false));
+    }
+    
+    // Giorni mese successivo
+    const totalCells = Math.ceil((daysFromPrevMonth + daysInMonth) / 7) * 7;
+    const remainingCells = totalCells - (daysFromPrevMonth + daysInMonth);
+    for (let i = 1; i <= remainingCells; i++) {
+        const date = new Date(year, month + 1, i);
+        calendarGrid.appendChild(createCalendarDay(date, i, true));
+    }
+}
+
+function createCalendarDay(date, dayNum, isOtherMonth) {
+    const dayDiv = document.createElement('div');
+    dayDiv.className = 'calendar-day';
+    if (isOtherMonth) dayDiv.classList.add('other-month');
+    
+    const today = new Date();
+    if (date.toDateString() === today.toDateString()) {
+        dayDiv.classList.add('today');
+    }
+    
+    const dayNumber = document.createElement('div');
+    dayNumber.className = 'day-number';
+    dayNumber.textContent = dayNum;
+    dayDiv.appendChild(dayNumber);
+    
+    const absencesOnDay = allAbsences.filter(absence => 
+        absence.date.toDateString() === date.toDateString()
+    );
+    
+    absencesOnDay.forEach(absence => {
+        const badge = document.createElement('span');
+        badge.className = `absence-badge ${absence.type.toLowerCase()}`;
+        badge.textContent = `${absence.userName.split(' ')[0]}`;
+        badge.title = `${absence.userName} - ${absence.type}`;
+        badge.onclick = (e) => {
+            e.stopPropagation();
+            showAbsenceDetails(date, absencesOnDay);
+        };
+        dayDiv.appendChild(badge);
+    });
+    
+    dayDiv.onclick = () => {
+        if (absencesOnDay.length > 0) {
+            showAbsenceDetails(date, absencesOnDay);
+        }
+    };
+    
+    return dayDiv;
+}
+
+function showAbsenceDetails(date, absences) {
+    const detailsDiv = document.getElementById('absenceDetails');
+    const absenceList = document.getElementById('absenceList');
+    
+    if (!detailsDiv || !absenceList) return;
+    
+    absenceList.innerHTML = '';
+    absences.forEach(absence => {
+        const item = document.createElement('div');
+        item.className = 'absence-item';
+        item.innerHTML = `
+            <strong>${escapeHtml(absence.userName)}</strong>
+            <span class="absence-type ${absence.type.toLowerCase()}">${absence.type}</span>
+            <span>${absence.details || ''}</span>
+            ${absence.attachment ? 
+                `<button class="btn-small download-attachment" data-attachment='${JSON.stringify(absence.attachment)}'>📎 Scarica</button>` : 
+                ''}
+        `;
+        absenceList.appendChild(item);
+    });
+    
+    absenceList.querySelectorAll('.download-attachment').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const att = JSON.parse(btn.getAttribute('data-attachment'));
+            if (att && att.data) {
+                const link = document.createElement('a');
+                link.href = att.data;
+                link.download = att.name || 'certificato.pdf';
+                link.click();
+            }
+        });
+    });
+    
+    detailsDiv.style.display = 'block';
+}
+
+function changeMonth(delta) {
+    currentCalendarDate.setMonth(currentCalendarDate.getMonth() + delta);
+    loadCalendarData();
+}
+
+function goToToday() {
+    currentCalendarDate = new Date();
+    loadCalendarData();
+}
+
+function initCalendarEvents() {
+    const prevMonthBtn = document.getElementById('prevMonth');
+    const nextMonthBtn = document.getElementById('nextMonth');
+    const todayBtn = document.getElementById('todayBtn');
+    
+    if (prevMonthBtn) prevMonthBtn.addEventListener('click', () => changeMonth(-1));
+    if (nextMonthBtn) nextMonthBtn.addEventListener('click', () => changeMonth(1));
+    if (todayBtn) todayBtn.addEventListener('click', goToToday);
+}
+
+function checkTodayAbsences() {
+    if (!appState.isAdmin) return;
+    
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    const todayAbsences = allAbsences.filter(absence => 
+        absence.date && absence.date.toDateString() === today.toDateString()
+    );
+    
+    if (todayAbsences.length > 0) {
+        const message = `📋 Oggi ${todayAbsences.length} assenze: ${todayAbsences.map(a => a.userName).join(', ')}`;
+        showToast(message, 'warning');
+        announceToScreenReader(message);
+        
+        if (notificationsEnabled && Notification.permission === 'granted') {
+            new Notification('📅 Assenze Oggi', {
+                body: message,
+                tag: 'daily-absences'
+            });
+        }
+    }
+}
+
+function initNotifications() {
+    if (!('Notification' in window)) return;
+    
+    const banner = document.getElementById('notificationPermission');
+    if (!banner) return;
+    
+    if (Notification.permission === 'granted') {
+        notificationsEnabled = true;
+        banner.style.display = 'none';
+    } else if (Notification.permission !== 'denied') {
+        banner.style.display = 'flex';
+        
+        const enableBtn = document.getElementById('enableNotifications');
+        if (enableBtn) {
+            enableBtn.addEventListener('click', async () => {
+                const permission = await Notification.requestPermission();
+                if (permission === 'granted') {
+                    notificationsEnabled = true;
+                    banner.style.display = 'none';
+                    showToast('Notifiche attivate!', 'success');
+                }
+            });
+        }
+    }
+}
+
 // ==================== EVENT LISTENERS ====================
 function initializeEventListeners() {
-    // Login
     const loginForm = document.getElementById('loginForm');
-    if (loginForm) {
-        loginForm.addEventListener('submit', handleLogin);
-    }
+    if (loginForm) loginForm.addEventListener('submit', handleLogin);
     
-    // Logout
     const logoutBtn = document.getElementById('logoutBtn');
-    if (logoutBtn) {
-        logoutBtn.addEventListener('click', handleLogout);
-    }
+    if (logoutBtn) logoutBtn.addEventListener('click', handleLogout);
     
-    // Password reset
     const resetLink = document.getElementById('resetPasswordLink');
-    if (resetLink) {
-        resetLink.addEventListener('click', handlePasswordReset);
-    }
+    if (resetLink) resetLink.addEventListener('click', handlePasswordReset);
     
-    // Forms richieste
     const ferieForm = document.getElementById('ferieForm');
     if (ferieForm) ferieForm.addEventListener('submit', handleFerieSubmit);
     
@@ -1925,28 +1975,24 @@ function initializeEventListeners() {
     const permessiForm = document.getElementById('permessiForm');
     if (permessiForm) permessiForm.addEventListener('submit', handlePermessiSubmit);
     
-    // Export
     const exportPDF = document.getElementById('exportPDF');
     if (exportPDF) exportPDF.addEventListener('click', exportToPDF);
     
     const exportExcel = document.getElementById('exportExcel');
     if (exportExcel) exportExcel.addEventListener('click', exportToExcel);
     
-    // Admin
     const registerBtn = document.getElementById('registerEmployeeBtn');
     if (registerBtn) registerBtn.addEventListener('click', registerEmployee);
     
     const showEmployeesBtn = document.getElementById('showEmployeesBtn');
     if (showEmployeesBtn) showEmployeesBtn.addEventListener('click', toggleEmployeesList);
     
-    // Filtri
     const applyFiltersBtn = document.getElementById('applyFilters');
     if (applyFiltersBtn) applyFiltersBtn.addEventListener('click', applyFilters);
     
     const resetFiltersBtn = document.getElementById('resetFilters');
     if (resetFiltersBtn) resetFiltersBtn.addEventListener('click', resetFilters);
     
-    // Paginazione
     const prevPage = document.getElementById('prevPage');
     if (prevPage) prevPage.addEventListener('click', goToPreviousPage);
     
@@ -1959,18 +2005,22 @@ function initializeEventListeners() {
     const nextEmployeesPage = document.getElementById('nextEmployeesPage');
     if (nextEmployeesPage) nextEmployeesPage.addEventListener('click', goToNextEmployeesPage);
     
-    // Tabs
     document.querySelectorAll('.tab-button').forEach(btn => {
-        btn.addEventListener('click', handleTabSwitch);
+        btn.addEventListener('click', function() {
+            const tabId = this.dataset.tab;
+            document.querySelectorAll('.tab-button').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            this.classList.add('active');
+            const tabContent = document.getElementById(tabId);
+            if (tabContent) tabContent.classList.add('active');
+        });
     });
     
-    // Calcolo giorni ferie
     const ferieDataInizio = document.getElementById('ferieDataInizio');
     const ferieDataFine = document.getElementById('ferieDataFine');
     if (ferieDataInizio) ferieDataInizio.addEventListener('change', calcolaGiorniFerie);
     if (ferieDataFine) ferieDataFine.addEventListener('change', calcolaGiorniFerie);
     
-    // Filtro dipendente con debounce
     const filterEmployee = document.getElementById('filterEmployee');
     if (filterEmployee) {
         filterEmployee.addEventListener('input', debounce(() => {
@@ -1979,94 +2029,28 @@ function initializeEventListeners() {
         }, CONSTANTS.DEBOUNCE_DELAY));
     }
     
-    // Set date minime
     const today = new Date().toISOString().split('T')[0];
     ['ferieDataInizio', 'ferieDataFine', 'malattiaDataInizio', 'malattiaDataFine', 'permessiData'].forEach(id => {
         const input = document.getElementById(id);
         if (input) input.min = today;
     });
     
-    // Cambio password
     const changePasswordBtn = document.getElementById('changePasswordBtn');
     if (changePasswordBtn) {
         changePasswordBtn.addEventListener('click', () => {
             const dialog = document.getElementById('changePasswordDialog');
-            if (dialog) {
-                const form = document.getElementById('changePasswordForm');
-                if (form) form.reset();
-                dialog.showModal();
-            }
+            if (dialog) dialog.showModal();
         });
     }
     
     const changePasswordForm = document.getElementById('changePasswordForm');
-    if (changePasswordForm) {
-        changePasswordForm.addEventListener('submit', handleChangePassword);
-    }
+    if (changePasswordForm) changePasswordForm.addEventListener('submit', handleChangePassword);
     
     const closeChangePassword = document.getElementById('closeChangePassword');
     if (closeChangePassword) {
         closeChangePassword.addEventListener('click', () => {
             const dialog = document.getElementById('changePasswordDialog');
             if (dialog) dialog.close();
-        });
-    }
-    
-    // Chiusura modali click outside
-    const changePasswordDialog = document.getElementById('changePasswordDialog');
-    if (changePasswordDialog) {
-        changePasswordDialog.addEventListener('click', (e) => {
-            if (e.target === changePasswordDialog) {
-                changePasswordDialog.close();
-            }
-        });
-    }
-    // Aggiungi listener per la modifica delle date nel modal di modifica
-    const editFerieInizio = document.getElementById('editFerieDataInizio');
-    const editFerieFine = document.getElementById('editFerieDataFine');
-    
-    if (editFerieInizio && editFerieFine) {
-        const updateDays = () => {
-            if (editFerieInizio.value && editFerieFine.value) {
-                const giorni = calcolaGiorniLavorativi(editFerieInizio.value, editFerieFine.value);
-                const giorniInput = document.getElementById('editFerieGiorni');
-                if (giorniInput) giorniInput.value = giorni;
-            }
-        };
-        editFerieInizio.addEventListener('change', updateDays);
-        editFerieFine.addEventListener('change', updateDays);
-    }
-}
-
-function handleTabSwitch(e) {
-    const tabId = this.dataset.tab;
-    
-    document.querySelectorAll('.tab-button').forEach(btn => {
-        btn.classList.remove('active');
-        btn.setAttribute('aria-selected', 'false');
-    });
-    
-    document.querySelectorAll('.tab-content').forEach(content => {
-        content.classList.remove('active');
-    });
-    
-    this.classList.add('active');
-    this.setAttribute('aria-selected', 'true');
-    
-    const tabContent = document.getElementById(tabId);
-    if (tabContent) tabContent.classList.add('active');
-}
-
-function initPasswordToggle() {
-    const toggleBtn = document.getElementById('togglePassword');
-    const passwordInput = document.getElementById('password');
-    
-    if (toggleBtn && passwordInput) {
-        toggleBtn.addEventListener('click', () => {
-            const type = passwordInput.type === 'password' ? 'text' : 'password';
-            passwordInput.type = type;
-            toggleBtn.textContent = type === 'password' ? '👁️' : '🔒';
-            toggleBtn.setAttribute('aria-pressed', type === 'text');
         });
     }
 }
@@ -2112,11 +2096,7 @@ function setupFirebaseAuth() {
                     appState.currentUser = user;
                     appState.currentUserData = userDoc.data();
                     appState.isAdmin = userDoc.data().role === 'admin';
-                    
-                    // CHIAMA DIRETTAMENTE setupUIWithCalendar (non setupUI)
-                    if (typeof setupUIWithCalendar === 'function') {
-                        setupUIWithCalendar();
-                    }
+                    setupUI();
                 } else {
                     await auth.signOut();
                     showLogin();
@@ -2131,1031 +2111,24 @@ function setupFirebaseAuth() {
         }
     });
 }
-// ==================== EDIT REQUEST FUNCTIONS ====================
 
-// Variabile globale per tracciare se il form è inizializzato
-let editFormInitialized = false;
-
-async function editRequest(requestId) {
-    console.log('🎯 Avvio modifica richiesta:', requestId);
-    
-    // Verifica che requestId sia valido
-    if (!requestId) {
-        console.error('❌ RequestId non valido');
-        showFeedback('Errore', 'ID richiesta non valido');
-        return;
-    }
-    
-    try {
-        // Recupera i dati della richiesta
-        const doc = await db.collection('richieste').doc(requestId).get();
-        
-        if (!doc.exists) {
-            console.error('❌ Richiesta non trovata:', requestId);
-            showFeedback('Errore', 'Richiesta non trovata');
-            return;
-        }
-        
-        const data = doc.data();
-        console.log('📋 Dati richiesta:', data);
-        
-        // Verifica che l'utente sia il proprietario
-        if (data.userId !== appState.currentUser.uid) {
-            console.error('❌ Utente non autorizzato');
-            showFeedback('Errore', 'Non hai i permessi per modificare questa richiesta');
-            return;
-        }
-        
-        // Verifica che la richiesta sia in attesa
-        if (data.stato !== 'In attesa') {
-            console.error('❌ Richiesta non in attesa:', data.stato);
-            showFeedback('Errore', 'Puoi modificare solo richieste in stato "In attesa"');
-            return;
-        }
-        
-        // IMPORTANTE: Imposta l'ID nel campo hidden PRIMA di tutto
-        const editRequestIdInput = document.getElementById('editRequestId');
-        const editRequestTypeInput = document.getElementById('editRequestType');
-        
-        if (!editRequestIdInput) {
-            console.error('❌ Campo editRequestId non trovato nel DOM');
-            showFeedback('Errore', 'Errore tecnico: campo ID non trovato');
-            return;
-        }
-        
-        if (!editRequestTypeInput) {
-            console.error('❌ Campo editRequestType non trovato nel DOM');
-            showFeedback('Errore', 'Errore tecnico: campo tipo non trovato');
-            return;
-        }
-        
-        // Imposta i valori
-        editRequestIdInput.value = requestId;
-        editRequestTypeInput.value = data.tipo;
-        
-        console.log('✅ ID richiesta impostato:', editRequestIdInput.value);
-        console.log('✅ Tipo richiesta impostato:', editRequestTypeInput.value);
-        
-        // Rimuovi tutti gli attributi required
-        removeRequiredAttributes();
-        
-        // Nascondi tutti i campi
-        document.querySelectorAll('.edit-fields').forEach(field => {
-            field.style.display = 'none';
-        });
-        
-        // Mostra il messaggio informativo
-        const infoMessage = document.getElementById('editInfoMessage');
-        if (infoMessage) infoMessage.style.display = 'block';
-        
-        // Popola i campi in base al tipo
-        if (data.tipo === 'Ferie') {
-            console.log('📅 Modifica Ferie');
-            const ferieFields = document.getElementById('editFerieFields');
-            if (ferieFields) {
-                ferieFields.style.display = 'block';
-                addRequiredToVisibleFields('ferie');
-            }
-            
-            const dataInizio = data.dataInizio?.toDate ? data.dataInizio.toDate() : new Date(data.dataInizio);
-            const dataFine = data.dataFine?.toDate ? data.dataFine.toDate() : new Date(data.dataFine);
-            
-            const inizioInput = document.getElementById('editFerieDataInizio');
-            const fineInput = document.getElementById('editFerieDataFine');
-            const giorniInput = document.getElementById('editFerieGiorni');
-            
-            if (inizioInput) inizioInput.value = dataInizio.toISOString().split('T')[0];
-            if (fineInput) fineInput.value = dataFine.toISOString().split('T')[0];
-            if (giorniInput) giorniInput.value = data.giorni || 0;
-            
-            // Aggiorna giorni quando cambiano le date
-            const updateDays = () => {
-                if (inizioInput && inizioInput.value && fineInput && fineInput.value) {
-                    const giorni = calcolaGiorniLavorativi(inizioInput.value, fineInput.value);
-                    if (giorniInput) giorniInput.value = giorni;
-                }
-            };
-            
-            if (inizioInput) {
-                inizioInput.removeEventListener('change', updateDays);
-                inizioInput.addEventListener('change', updateDays);
-            }
-            if (fineInput) {
-                fineInput.removeEventListener('change', updateDays);
-                fineInput.addEventListener('change', updateDays);
-            }
-            
-        } else if (data.tipo === 'Malattia') {
-            console.log('🏥 Modifica Malattia');
-            const malattiaFields = document.getElementById('editMalattiaFields');
-            if (malattiaFields) {
-                malattiaFields.style.display = 'block';
-                addRequiredToVisibleFields('malattia');
-            }
-            
-            const dataInizio = data.dataInizio?.toDate ? data.dataInizio.toDate() : new Date(data.dataInizio);
-            const dataFine = data.dataFine?.toDate ? data.dataFine.toDate() : new Date(data.dataFine);
-            const dataCertificato = data.dataCertificato?.toDate ? data.dataCertificato.toDate() : new Date(data.dataCertificato);
-            
-            const inizioInput = document.getElementById('editMalattiaDataInizio');
-            const fineInput = document.getElementById('editMalattiaDataFine');
-            const numeroInput = document.getElementById('editMalattiaNumeroCertificato');
-            const dataCertInput = document.getElementById('editMalattiaDataCertificato');
-            
-            if (inizioInput) inizioInput.value = dataInizio.toISOString().split('T')[0];
-            if (fineInput) fineInput.value = dataFine.toISOString().split('T')[0];
-            if (numeroInput) numeroInput.value = data.numeroCertificato || '';
-            if (dataCertInput) dataCertInput.value = dataCertificato.toISOString().split('T')[0];
-            
-        } else if (data.tipo === 'Permesso') {
-            console.log('⏰ Modifica Permesso');
-            const permessiFields = document.getElementById('editPermessiFields');
-            if (permessiFields) {
-                permessiFields.style.display = 'block';
-                addRequiredToVisibleFields('permesso');
-            }
-            
-            const dataPermesso = data.data?.toDate ? data.data.toDate() : new Date(data.data);
-            
-            const dataInput = document.getElementById('editPermessiData');
-            const oraInizioInput = document.getElementById('editPermessiOraInizio');
-            const oraFineInput = document.getElementById('editPermessiOraFine');
-            const motivazioneInput = document.getElementById('editPermessiMotivazione');
-            
-            if (dataInput) dataInput.value = dataPermesso.toISOString().split('T')[0];
-            if (oraInizioInput) oraInizioInput.value = data.oraInizio || '';
-            if (oraFineInput) oraFineInput.value = data.oraFine || '';
-            if (motivazioneInput) motivazioneInput.value = data.motivazione || '';
-        }
-        
-        // Mostra il dialog
-        const dialog = document.getElementById('editRequestDialog');
-        if (dialog) {
-            // Verifica che l'ID sia stato impostato prima di aprire
-            console.log('🔍 Verifica finale - editRequestId.value:', document.getElementById('editRequestId').value);
-            dialog.showModal();
-            console.log('✅ Dialog modifica aperto');
-        } else {
-            console.error('❌ Dialog editRequestDialog non trovato');
-        }
-        
-    } catch (error) {
-        console.error('❌ Errore nel caricamento della richiesta:', error);
-        showFeedback('Errore', 'Impossibile caricare la richiesta da modificare: ' + error.message);
-    }
-}
-
-// Funzione per rimuovere tutti gli attributi required
-function removeRequiredAttributes() {
-    const allInputs = document.querySelectorAll('#editRequestForm input, #editRequestForm select, #editRequestForm textarea');
-    allInputs.forEach(input => {
-        input.removeAttribute('required');
-    });
-}
-
-// Funzione per aggiungere required solo ai campi visibili
-function addRequiredToVisibleFields(type) {
-    const requiredFields = {
-        ferie: ['editFerieDataInizio', 'editFerieDataFine'],
-        malattia: ['editMalattiaDataInizio', 'editMalattiaDataFine', 'editMalattiaNumeroCertificato', 'editMalattiaDataCertificato'],
-        permesso: ['editPermessiData', 'editPermessiOraInizio', 'editPermessiOraFine']
-    };
-    
-    const fieldsToRequire = requiredFields[type] || [];
-    fieldsToRequire.forEach(fieldId => {
-        const field = document.getElementById(fieldId);
-        if (field) {
-            field.setAttribute('required', 'required');
-        }
-    });
-}
-async function handleEditRequestSubmit(e) {
-    e.preventDefault();
-    
-    console.log('📝 Submit modifica richiesta - INIZIO');
-    
-    // Recupera l'ID dal campo hidden
-    const editRequestIdInput = document.getElementById('editRequestId');
-    const requestId = editRequestIdInput ? editRequestIdInput.value : null;
-    const requestType = document.getElementById('editRequestType')?.value;
-    
-    console.log('🔍 Valori recuperati:');
-    console.log('- editRequestId element:', editRequestIdInput);
-    console.log('- requestId value:', requestId);
-    console.log('- requestType:', requestType);
-    
-    if (!requestId) {
-        console.error('❌ ID richiesta non valido - valore vuoto');
-        showFeedback('Errore', 'ID richiesta non valido. Prova a ricaricare la pagina.');
-        return;
-    }
-    
-    if (!requestType) {
-        console.error('❌ Tipo richiesta non valido');
-        showFeedback('Errore', 'Tipo richiesta non valido');
-        return;
-    }
-    
-    // Validazione manuale dei campi visibili
-    const visibleFields = document.querySelectorAll('#editRequestForm .edit-fields[style*="display: block"] input, #editRequestForm .edit-fields[style*="display: block"] select, #editRequestForm .edit-fields[style*="display: block"] textarea');
-    let isValid = true;
-    let firstInvalid = null;
-    
-    visibleFields.forEach(field => {
-        if (field.hasAttribute('required') && !field.value.trim()) {
-            isValid = false;
-            if (!firstInvalid) firstInvalid = field;
-            field.classList.add('invalid');
-        } else {
-            field.classList.remove('invalid');
-        }
-    });
-    
-    if (!isValid) {
-        showFeedback('Errore', 'Compila tutti i campi obbligatori');
-        if (firstInvalid) {
-            firstInvalid.focus();
-            firstInvalid.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        }
-        return;
-    }
-    
-    try {
-        const submitBtn = e.target.querySelector('button[type="submit"]');
-        setLoadingState(submitBtn, true);
-        
-        let updateData = {
-            updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
-            updatedBy: appState.currentUser.uid,
-            updatedByName: appState.currentUserData.name
-        };
-        
-        // Raccogli i dati in base al tipo
-        if (requestType === 'Ferie') {
-            const inizioInput = document.getElementById('editFerieDataInizio');
-            const fineInput = document.getElementById('editFerieDataFine');
-            
-            if (!inizioInput || !fineInput) {
-                throw new Error('Campi non trovati');
-            }
-            
-            const dataInizio = new Date(inizioInput.value);
-            const dataFine = new Date(fineInput.value);
-            const oggi = new Date();
-            oggi.setHours(0, 0, 0);
-            
-            if (isNaN(dataInizio.getTime()) || isNaN(dataFine.getTime())) {
-                showFeedback('Errore', 'Date non valide');
-                setLoadingState(submitBtn, false);
-                return;
-            }
-            
-            if (dataInizio < oggi) {
-                showFeedback('Errore', 'Non puoi modificare con date passate');
-                setLoadingState(submitBtn, false);
-                return;
-            }
-            
-            if (dataFine < dataInizio) {
-                showFeedback('Errore', 'La data di fine non può essere precedente alla data di inizio');
-                setLoadingState(submitBtn, false);
-                return;
-            }
-            
-            const giorni = calcolaGiorniLavorativi(dataInizio, dataFine);
-            if (giorni <= 0) {
-                showFeedback('Errore', 'Nessun giorno lavorativo nel periodo');
-                setLoadingState(submitBtn, false);
-                return;
-            }
-            
-            updateData = {
-                ...updateData,
-                dataInizio: firebase.firestore.Timestamp.fromDate(dataInizio),
-                dataFine: firebase.firestore.Timestamp.fromDate(dataFine),
-                giorni: giorni,
-                stato: 'In attesa'
-            };
-            
-        } else if (requestType === 'Malattia') {
-            const inizioInput = document.getElementById('editMalattiaDataInizio');
-            const fineInput = document.getElementById('editMalattiaDataFine');
-            const numeroInput = document.getElementById('editMalattiaNumeroCertificato');
-            const dataCertInput = document.getElementById('editMalattiaDataCertificato');
-            
-            if (!inizioInput || !fineInput || !numeroInput || !dataCertInput) {
-                throw new Error('Campi non trovati');
-            }
-            
-            const dataInizio = new Date(inizioInput.value);
-            const dataFine = new Date(fineInput.value);
-            const numeroCertificato = numeroInput.value.trim();
-            const dataCertificato = new Date(dataCertInput.value);
-            
-            if (isNaN(dataInizio.getTime()) || isNaN(dataFine.getTime()) || isNaN(dataCertificato.getTime())) {
-                showFeedback('Errore', 'Date non valide');
-                setLoadingState(submitBtn, false);
-                return;
-            }
-            
-            if (dataFine < dataInizio) {
-                showFeedback('Errore', 'La data di fine non può essere precedente alla data di inizio');
-                setLoadingState(submitBtn, false);
-                return;
-            }
-            
-            if (!numeroCertificato) {
-                showFeedback('Errore', 'Il numero del certificato è obbligatorio');
-                setLoadingState(submitBtn, false);
-                return;
-            }
-            
-            updateData = {
-                ...updateData,
-                dataInizio: firebase.firestore.Timestamp.fromDate(dataInizio),
-                dataFine: firebase.firestore.Timestamp.fromDate(dataFine),
-                numeroCertificato: sanitizeInput(numeroCertificato),
-                dataCertificato: firebase.firestore.Timestamp.fromDate(dataCertificato),
-                stato: 'In attesa'
-            };
-            
-        } else if (requestType === 'Permesso') {
-            const dataInput = document.getElementById('editPermessiData');
-            const oraInizioInput = document.getElementById('editPermessiOraInizio');
-            const oraFineInput = document.getElementById('editPermessiOraFine');
-            const motivazioneInput = document.getElementById('editPermessiMotivazione');
-            
-            if (!dataInput || !oraInizioInput || !oraFineInput) {
-                throw new Error('Campi non trovati');
-            }
-            
-            const data = new Date(dataInput.value);
-            const oraInizio = oraInizioInput.value;
-            const oraFine = oraFineInput.value;
-            const motivazione = motivazioneInput ? motivazioneInput.value.trim() : '';
-            const oggi = new Date();
-            oggi.setHours(0, 0, 0);
-            
-            if (isNaN(data.getTime())) {
-                showFeedback('Errore', 'Data non valida');
-                setLoadingState(submitBtn, false);
-                return;
-            }
-            
-            if (data < oggi) {
-                showFeedback('Errore', 'Non puoi modificare con una data passata');
-                setLoadingState(submitBtn, false);
-                return;
-            }
-            
-            if (!oraInizio || !oraFine) {
-                showFeedback('Errore', 'Le ore di inizio e fine sono obbligatorie');
-                setLoadingState(submitBtn, false);
-                return;
-            }
-            
-            if (oraInizio >= oraFine) {
-                showFeedback('Errore', 'L\'ora di fine deve essere successiva all\'ora di inizio');
-                setLoadingState(submitBtn, false);
-                return;
-            }
-            
-            updateData = {
-                ...updateData,
-                data: firebase.firestore.Timestamp.fromDate(data),
-                oraInizio: oraInizio,
-                oraFine: oraFine,
-                motivazione: sanitizeInput(motivazione) || '',
-                stato: 'In attesa'
-            };
-        }
-        
-        console.log('💾 Aggiornamento richiesta:', requestId, updateData);
-        
-        // Aggiorna la richiesta nel database
-        await db.collection('richieste').doc(requestId).update(updateData);
-        
-        // Chiudi il dialog
-        const dialog = document.getElementById('editRequestDialog');
-        if (dialog) dialog.close();
-        
-        showFeedback('Successo', '✅ Richiesta modificata con successo!');
-        showToast('Richiesta aggiornata e tornata in stato "In attesa"', 'success');
-        
-        // Resetta il form
-        resetEditForm();
-        
-        // Ricarica la lista delle richieste
-        await loadRequests();
-        
-        console.log('✅ Modifica completata con successo');
-        
-    } catch (error) {
-        console.error('❌ Errore nella modifica:', error);
-        showFeedback('Errore', 'Errore durante la modifica della richiesta: ' + error.message);
-    } finally {
-        const submitBtn = document.querySelector('#editRequestForm button[type="submit"]');
-        setLoadingState(submitBtn, false);
-    }
-}
-
-// Funzione per resettare il form
-function resetEditForm() {
-    const form = document.getElementById('editRequestForm');
-    if (form) form.reset();
-    
-    // Rimuovi required da tutti i campi
-    removeRequiredAttributes();
-    
-    // Nascondi tutti i campi
-    document.querySelectorAll('.edit-fields').forEach(field => {
-        field.style.display = 'none';
-    });
-    
-    // Nascondi messaggio informativo
-    const infoMessage = document.getElementById('editInfoMessage');
-    if (infoMessage) infoMessage.style.display = 'none';
-    
-    // Rimuovi classe invalid
-    document.querySelectorAll('.invalid').forEach(field => {
-        field.classList.remove('invalid');
-    });
-}
-// CORREZIONE: Migliora la funzione handleEditRequestSubmit
-async function handleEditRequestSubmit(e) {
-    e.preventDefault();
-    
-    console.log('📝 Submit modifica richiesta - INIZIO');
-    
-    const requestId = document.getElementById('editRequestId').value;
-    const requestType = document.getElementById('editRequestType').value;
-    
-    console.log('Request ID:', requestId);
-    console.log('Request Type:', requestType);
-    
-    if (!requestId) {
-        showFeedback('Errore', 'ID richiesta non valido');
-        return;
-    }
-    
-    try {
-        const submitBtn = e.target.querySelector('button[type="submit"]');
-        setLoadingState(submitBtn, true);
-        
-        let updateData = {
-            updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
-            updatedBy: appState.currentUser.uid,
-            updatedByName: appState.currentUserData.name
-        };
-        
-        // Raccogli i dati in base al tipo
-        if (requestType === 'Ferie') {
-            const inizioInput = document.getElementById('editFerieDataInizio');
-            const fineInput = document.getElementById('editFerieDataFine');
-            
-            if (!inizioInput || !fineInput) {
-                throw new Error('Campi non trovati');
-            }
-            
-            const dataInizio = new Date(inizioInput.value);
-            const dataFine = new Date(fineInput.value);
-            const oggi = new Date();
-            oggi.setHours(0, 0, 0);
-            
-            // Validazioni
-            if (isNaN(dataInizio.getTime()) || isNaN(dataFine.getTime())) {
-                showFeedback('Errore', 'Date non valide');
-                setLoadingState(submitBtn, false);
-                return;
-            }
-            
-            if (dataInizio < oggi) {
-                showFeedback('Errore', 'Non puoi modificare con date passate');
-                setLoadingState(submitBtn, false);
-                return;
-            }
-            
-            if (dataFine < dataInizio) {
-                showFeedback('Errore', 'La data di fine non può essere precedente alla data di inizio');
-                setLoadingState(submitBtn, false);
-                return;
-            }
-            
-            const giorni = calcolaGiorniLavorativi(dataInizio, dataFine);
-            if (giorni <= 0) {
-                showFeedback('Errore', 'Nessun giorno lavorativo nel periodo');
-                setLoadingState(submitBtn, false);
-                return;
-            }
-            
-            updateData = {
-                ...updateData,
-                dataInizio: firebase.firestore.Timestamp.fromDate(dataInizio),
-                dataFine: firebase.firestore.Timestamp.fromDate(dataFine),
-                giorni: giorni,
-                stato: 'In attesa'
-            };
-            
-            console.log('📅 Aggiornamento Ferie:', updateData);
-            
-        } else if (requestType === 'Malattia') {
-            const inizioInput = document.getElementById('editMalattiaDataInizio');
-            const fineInput = document.getElementById('editMalattiaDataFine');
-            const numeroInput = document.getElementById('editMalattiaNumeroCertificato');
-            const dataCertInput = document.getElementById('editMalattiaDataCertificato');
-            
-            if (!inizioInput || !fineInput || !numeroInput || !dataCertInput) {
-                throw new Error('Campi non trovati');
-            }
-            
-            const dataInizio = new Date(inizioInput.value);
-            const dataFine = new Date(fineInput.value);
-            const numeroCertificato = numeroInput.value.trim();
-            const dataCertificato = new Date(dataCertInput.value);
-            
-            if (isNaN(dataInizio.getTime()) || isNaN(dataFine.getTime()) || isNaN(dataCertificato.getTime())) {
-                showFeedback('Errore', 'Date non valide');
-                setLoadingState(submitBtn, false);
-                return;
-            }
-            
-            if (dataFine < dataInizio) {
-                showFeedback('Errore', 'La data di fine non può essere precedente alla data di inizio');
-                setLoadingState(submitBtn, false);
-                return;
-            }
-            
-            if (!numeroCertificato) {
-                showFeedback('Errore', 'Il numero del certificato è obbligatorio');
-                setLoadingState(submitBtn, false);
-                return;
-            }
-            
-            updateData = {
-                ...updateData,
-                dataInizio: firebase.firestore.Timestamp.fromDate(dataInizio),
-                dataFine: firebase.firestore.Timestamp.fromDate(dataFine),
-                numeroCertificato: sanitizeInput(numeroCertificato),
-                dataCertificato: firebase.firestore.Timestamp.fromDate(dataCertificato),
-                stato: 'In attesa'
-            };
-            
-            console.log('🏥 Aggiornamento Malattia:', updateData);
-            
-        } else if (requestType === 'Permesso') {
-            const dataInput = document.getElementById('editPermessiData');
-            const oraInizioInput = document.getElementById('editPermessiOraInizio');
-            const oraFineInput = document.getElementById('editPermessiOraFine');
-            const motivazioneInput = document.getElementById('editPermessiMotivazione');
-            
-            if (!dataInput || !oraInizioInput || !oraFineInput) {
-                throw new Error('Campi non trovati');
-            }
-            
-            const data = new Date(dataInput.value);
-            const oraInizio = oraInizioInput.value;
-            const oraFine = oraFineInput.value;
-            const motivazione = motivazioneInput ? motivazioneInput.value.trim() : '';
-            const oggi = new Date();
-            oggi.setHours(0, 0, 0);
-            
-            if (isNaN(data.getTime())) {
-                showFeedback('Errore', 'Data non valida');
-                setLoadingState(submitBtn, false);
-                return;
-            }
-            
-            if (data < oggi) {
-                showFeedback('Errore', 'Non puoi modificare con una data passata');
-                setLoadingState(submitBtn, false);
-                return;
-            }
-            
-            if (!oraInizio || !oraFine) {
-                showFeedback('Errore', 'Le ore di inizio e fine sono obbligatorie');
-                setLoadingState(submitBtn, false);
-                return;
-            }
-            
-            if (oraInizio >= oraFine) {
-                showFeedback('Errore', 'L\'ora di fine deve essere successiva all\'ora di inizio');
-                setLoadingState(submitBtn, false);
-                return;
-            }
-            
-            updateData = {
-                ...updateData,
-                data: firebase.firestore.Timestamp.fromDate(data),
-                oraInizio: oraInizio,
-                oraFine: oraFine,
-                motivazione: sanitizeInput(motivazione) || '',
-                stato: 'In attesa'
-            };
-            
-            console.log('⏰ Aggiornamento Permesso:', updateData);
-        }
-        
-        // Aggiorna la richiesta nel database
-        console.log('💾 Salvataggio modifiche per richiesta:', requestId);
-        await db.collection('richieste').doc(requestId).update(updateData);
-        
-        // Chiudi il dialog
-        const dialog = document.getElementById('editRequestDialog');
-        if (dialog) dialog.close();
-        
-        showFeedback('Successo', '✅ Richiesta modificata con successo!');
-        showToast('Richiesta aggiornata e tornata in stato "In attesa"', 'success');
-        
-        // Ricarica la lista delle richieste
-        await loadRequests();
-        
-        console.log('✅ Modifica completata con successo');
-        
-    } catch (error) {
-        console.error('❌ Errore nella modifica:', error);
-        showFeedback('Errore', 'Errore durante la modifica della richiesta: ' + error.message);
-    } finally {
-        const submitBtn = document.querySelector('#editRequestForm button[type="submit"]');
-        setLoadingState(submitBtn, false);
-    }
-}
-function highlightEditedRequest(requestId) {
-    // Trova la riga nella tabella e aggiungi una classe di evidenziazione
-    const rows = document.querySelectorAll('#richiesteBody tr');
-    for (let row of rows) {
-        const saveBtn = row.querySelector(`[data-id="${requestId}"]`);
-        if (saveBtn || row.textContent.includes(requestId)) {
-            row.classList.add('request-edited');
-            setTimeout(() => {
-                row.classList.remove('request-edited');
-            }, 1000);
-            break;
-        }
-    }
-}
-// ==================== CALENDARIO ASSENZE ====================
-let currentCalendarDate = new Date();
-let allAbsences = [];
-
-// Versione corretta di loadCalendarData
-async function loadCalendarData() {
-    if (!appState.isAdmin) return;
-    
-    try {
-        const year = currentCalendarDate.getFullYear();
-        const month = currentCalendarDate.getMonth();
-        
-        const snapshot = await db.collection('richieste')
-            .where('stato', '==', 'Approvato')
-            .get();
-        
-        allAbsences = [];
-        snapshot.forEach(doc => {
-            const data = doc.data();
-            let absenceDays = [];
-            
-            if (data.tipo === 'Permesso') {
-                const date = data.data?.toDate();
-                if (date && date.getMonth() === month && date.getFullYear() === year) {
-                    absenceDays.push({
-                        date: date,
-                        type: data.tipo,
-                        userName: data.userName,
-                        details: `${data.oraInizio}-${data.oraFine}`,
-                        requestId: doc.id
-                    });
-                }
-            } else if (data.tipo === 'Ferie' || data.tipo === 'Malattia') {
-                const start = data.dataInizio?.toDate();
-                const end = data.dataFine?.toDate();
-                if (start && end) {
-                    let current = new Date(start);
-                    while (current <= end) {
-                        if (current.getMonth() === month && current.getFullYear() === year) {
-                            const dayOfWeek = current.getDay();
-                            if (dayOfWeek !== 0 && dayOfWeek !== 6) {
-                                absenceDays.push({
-                                    date: new Date(current),
-                                    type: data.tipo,
-                                    userName: data.userName,
-                                    details: data.tipo === 'Malattia' ? 
-                                        `Cert. ${data.numeroCertificato || 'N/D'}` : 
-                                        `${data.giorni || 1} giorni`,
-                                    requestId: doc.id,
-                                    attachment: data.attachment || null
-                                });
-                            }
-                        }
-                        current.setDate(current.getDate() + 1);
-                    }
-                }
-            }
-            
-            allAbsences.push(...absenceDays);
-        });
-        
-        renderCalendar();
-        checkTodayAbsences();
-        
-    } catch (error) {
-        console.error('Errore caricamento calendario:', error);
-    }
-}
-
-function renderCalendar() {
-    const year = currentCalendarDate.getFullYear();
-    const month = currentCalendarDate.getMonth();
-    
-    const firstDay = new Date(year, month, 1);
-    const lastDay = new Date(year, month + 1, 0);
-    const startDayOfWeek = firstDay.getDay();
-    
-    const daysInMonth = lastDay.getDate();
-    const daysFromPrevMonth = startDayOfWeek === 0 ? 6 : startDayOfWeek - 1;
-    
-    const calendarGrid = document.getElementById('calendarGrid');
-    if (!calendarGrid) return;
-    
-    // Aggiorna titolo mese
-    const monthNames = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 
-                        'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'];
-    const currentMonthSpan = document.getElementById('currentMonthYear');
-    if (currentMonthSpan) {
-        currentMonthSpan.textContent = `${monthNames[month]} ${year}`;
-    }
-    
-    // Crea intestazione giorni
-    const weekDays = ['Lun', 'Mar', 'Mer', 'Gio', 'Ven', 'Sab', 'Dom'];
-    calendarGrid.innerHTML = weekDays.map(day => 
-        `<div class="calendar-weekday">${day}</div>`
-    ).join('');
-    
-    // Giorni mese precedente
-    const prevMonthDate = new Date(year, month, 0);
-    const prevMonthDays = prevMonthDate.getDate();
-    for (let i = daysFromPrevMonth - 1; i >= 0; i--) {
-        const dayNum = prevMonthDays - i;
-        const date = new Date(year, month - 1, dayNum);
-        calendarGrid.appendChild(createCalendarDay(date, dayNum, true));
-    }
-    
-    // Giorni mese corrente
-    for (let i = 1; i <= daysInMonth; i++) {
-        const date = new Date(year, month, i);
-        calendarGrid.appendChild(createCalendarDay(date, i, false));
-    }
-    
-    // Giorni mese successivo
-    const totalCells = Math.ceil((daysFromPrevMonth + daysInMonth) / 7) * 7;
-    const remainingCells = totalCells - (daysFromPrevMonth + daysInMonth);
-    for (let i = 1; i <= remainingCells; i++) {
-        const date = new Date(year, month + 1, i);
-        calendarGrid.appendChild(createCalendarDay(date, i, true));
-    }
-}
-
-function createCalendarDay(date, dayNum, isOtherMonth) {
-    const dayDiv = document.createElement('div');
-    dayDiv.className = 'calendar-day';
-    if (isOtherMonth) dayDiv.classList.add('other-month');
-    
-    const today = new Date();
-    if (date.toDateString() === today.toDateString()) {
-        dayDiv.classList.add('today');
-    }
-    
-    const dayNumber = document.createElement('div');
-    dayNumber.className = 'day-number';
-    dayNumber.textContent = dayNum;
-    dayDiv.appendChild(dayNumber);
-    
-    // Aggiungi badge assenze
-    const absencesOnDay = allAbsences.filter(absence => 
-        absence.date.toDateString() === date.toDateString()
-    );
-    
-    absencesOnDay.forEach(absence => {
-        const badge = document.createElement('span');
-        badge.className = `absence-badge ${absence.type.toLowerCase()}`;
-        badge.textContent = `${absence.userName.split(' ')[0]}`;
-        badge.title = `${absence.userName} - ${absence.type}${absence.details ? ` (${absence.details})` : ''}`;
-        badge.onclick = (e) => {
-            e.stopPropagation();
-            showAbsenceDetails(date, absencesOnDay);
-        };
-        dayDiv.appendChild(badge);
-    });
-    
-    dayDiv.onclick = () => {
-        if (absencesOnDay.length > 0) {
-            showAbsenceDetails(date, absencesOnDay);
-        }
-    };
-    
-    return dayDiv;
-}
-
-function showAbsenceDetails(date, absences) {
-    const detailsDiv = document.getElementById('absenceDetails');
-    const absenceList = document.getElementById('absenceList');
-    
-    if (!detailsDiv || !absenceList) return;
-    
-    absenceList.innerHTML = '';
-    absences.forEach(absence => {
-        const item = document.createElement('div');
-        item.className = 'absence-item';
-        item.innerHTML = `
-            <strong>${escapeHtml(absence.userName)}</strong>
-            <span class="absence-type ${absence.type.toLowerCase()}">${absence.type}</span>
-            <span>${absence.details || ''}</span>
-            ${absence.attachment ? 
-                `<button class="btn-small download-attachment" data-url="${absence.attachment}">📎 Scarica Certificato</button>` : 
-                ''}
-        `;
-        absenceList.appendChild(item);
-    });
-    
-    // Aggiungi listener per download allegati
-    absenceList.querySelectorAll('.download-attachment').forEach(btn => {
-        btn.addEventListener('click', () => {
-            const url = btn.getAttribute('data-url');
-            if (url) window.open(url, '_blank');
-        });
-    });
-    
-    detailsDiv.style.display = 'block';
-    detailsDiv.scrollIntoView({ behavior: 'smooth' });
-}
-
-function changeMonth(delta) {
-    currentCalendarDate.setMonth(currentCalendarDate.getMonth() + delta);
-    loadCalendarData();
-}
-
-function goToToday() {
-    currentCalendarDate = new Date();
-    loadCalendarData();
-}
-
-// ==================== NOTIFICHE ASSENZE ====================
-let notificationsEnabled = false;
-
-async function checkTodayAbsences() {
-    if (!appState.isAdmin) return;
-    
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    
-    const todayAbsences = allAbsences.filter(absence => 
-        absence.date && absence.date.toDateString() === today.toDateString()
-    );
-    
-    if (todayAbsences.length > 0) {
-        const message = `📋 Oggi ci sono ${todayAbsences.length} assenze: ${todayAbsences.map(a => a.userName).join(', ')}`;
-        
-        showToast(message, 'warning');
-        if (typeof announceToScreenReader === 'function') {
-            announceToScreenReader(message);
-        }
-        
-        if (notificationsEnabled && Notification.permission === 'granted') {
-            new Notification('📅 Assenze Oggi', {
-                body: message,
-                icon: '/favicon.ico',
-                tag: 'daily-absences'
-            });
-        }
-    }
-}
-
-async function sendAbsenceNotificationEmail(absences) {
-    // Solo se EmailJS è configurato
-    if (typeof emailjs === 'undefined' || EMAILJS_CONFIG.publicKey === 'YOUR_PUBLIC_KEY') {
-        console.log('EmailJS non configurato - notifica email saltata');
-        return;
-    }
-    
-    try {
-        const adminEmail = appState.currentUser?.email;
-        if (!adminEmail) return;
-        
-        const absenceList = absences.map(a => 
-            `- ${a.userName}: ${a.type}${a.details ? ` (${a.details})` : ''}`
-        ).join('\n');
-        
-        const templateParams = {
-            to_email: adminEmail,
-            subject: `📅 Notifica Assenze - ${new Date().toLocaleDateString('it-IT')}`,
-            message: `Sono state rilevate le seguenti assenze per oggi:\n\n${absenceList}\n\nAccedi al sistema per maggiori dettagli.`,
-            date: new Date().toLocaleString('it-IT')
-        };
-        
-        await emailjs.send(
-            EMAILJS_CONFIG.serviceId,
-            EMAILJS_CONFIG.templateId,
-            templateParams,
-            EMAILJS_CONFIG.publicKey
-        );
-        
-        console.log('Email notifica inviata');
-    } catch (error) {
-        console.error('Errore invio email notifica:', error);
-    }
-}
-
-function initNotifications() {
-    if (!('Notification' in window)) {
-        console.log('Questo browser non supporta le notifiche');
-        return;
-    }
-    
-    const banner = document.getElementById('notificationPermission');
-    if (!banner) return;
-    
-    if (Notification.permission === 'granted') {
-        notificationsEnabled = true;
-        banner.style.display = 'none';
-    } else if (Notification.permission !== 'denied') {
-        banner.style.display = 'flex';
-        
-        const enableBtn = document.getElementById('enableNotifications');
-        if (enableBtn) {
-            enableBtn.addEventListener('click', async () => {
-                const permission = await Notification.requestPermission();
-                if (permission === 'granted') {
-                    notificationsEnabled = true;
-                    banner.style.display = 'none';
-                    showToast('Notifiche attivate! Riceverai avvisi sulle assenze', 'success');
-                }
-            });
-        }
-    }
-}
-
-// ==================== ALLEGATI CERTIFICATI ====================
-async function uploadAttachment(file, requestType) {
-    if (requestType !== 'Malattia') return null;
-    
-    return new Promise((resolve, reject) => {
-        if (!file || file.type !== 'application/pdf') {
-            reject(new Error('Solo file PDF sono supportati'));
-            return;
-        }
-        
-        if (file.size > 5 * 1024 * 1024) {
-            reject(new Error('Il file non può superare i 5MB'));
-            return;
-        }
-        
-        // Usa FileReader per convertire in base64 (alternativa a storage)
-        const reader = new FileReader();
-        reader.onload = function(e) {
-            resolve({
-                name: file.name,
-                data: e.target.result,
-                size: file.size,
-                type: file.type,
-                uploadDate: new Date().toISOString()
-            });
-        };
-        reader.onerror = reject;
-        reader.readAsDataURL(file);
-    });
-}
-
-// ==================== INITIALIZATION ====================
-// Versione corretta di initializeAppWithFeatures
-// ==================== INITIALIZATION ====================
 // ==================== INITIALIZATION ====================
 function initializeApp() {
     console.log('🚀 Avvio applicazione...');
     
-    // Inizializza modali
-    if (typeof initializeModals === 'function') initializeModals();
-    if (typeof initializeEditModal === 'function') initializeEditModal();
-    if (typeof setupEditDialogReset === 'function') setupEditDialogReset();
-    if (typeof initializeEventListeners === 'function') initializeEventListeners();
-    if (typeof initPasswordToggle === 'function') initPasswordToggle();
-    if (typeof initPasswordStrengthChecker === 'function') initPasswordStrengthChecker();
+    initializeModals();
+    initializeEditModal();
+    setupEditDialogReset();
+    initializeEventListeners();
+    initPasswordToggle();
+    initPasswordStrengthChecker();
+    setupFirebaseAuth();
+    initCalendarEvents();
     
-    // Inizializza eventi calendario
-    if (typeof initCalendarEvents === 'function') initCalendarEvents();
-    
-    // Setup Firebase auth (questo chiamerà setupUIWithCalendar quando l'utente è loggato)
-    if (typeof setupFirebaseAuth === 'function') {
-        setupFirebaseAuth();
-    }
-    
-    // Aggiungi stili dinamici
     if (!document.getElementById('dynamic-calendar-styles')) {
         const style = document.createElement('style');
         style.id = 'dynamic-calendar-styles';
         style.textContent = `
-            @keyframes slideDown {
-                from { opacity: 0; transform: translateY(-20px); }
-                to { opacity: 1; transform: translateY(0); }
-            }
             .btn-small.download-attachment {
                 background: #4CAF50;
                 color: white;
@@ -3165,9 +2138,6 @@ function initializeApp() {
                 cursor: pointer;
                 font-size: 0.7rem;
                 margin-left: 5px;
-            }
-            .btn-small.download-attachment:hover {
-                background: #45a049;
             }
             .absence-details {
                 max-height: 400px;
@@ -3182,4 +2152,3 @@ function initializeApp() {
 
 // Avvio applicazione
 document.addEventListener('DOMContentLoaded', initializeApp);
-

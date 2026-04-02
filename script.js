@@ -703,7 +703,7 @@ async function loadRequests() {
     }
 }
 
-function renderRequests(docs) {
+function renderRequestsWithAttachments(docs) {
     const richiesteBody = document.getElementById('richiesteBody');
     if (!richiesteBody) return;
     
@@ -711,9 +711,7 @@ function renderRequests(docs) {
     
     if (docs.length === 0) {
         const colspan = appState.isAdmin ? 6 : 5;
-        richiesteBody.innerHTML = `
-            <tr><td colspan="${colspan}" class="text-center">Nessuna richiesta trovata</td></tr>
-        `;
+        richiesteBody.innerHTML = `<tr><td colspan="${colspan}" class="text-center">Nessuna richiesta trovata</td></tr>`;
         return;
     }
     
@@ -721,7 +719,6 @@ function renderRequests(docs) {
         const data = doc.data();
         let periodo = '', dettagli = '';
         
-        // Formatta i dati in base al tipo
         switch (data.tipo) {
             case 'Ferie':
                 periodo = `${formatDate(data.dataInizio)} - ${formatDate(data.dataFine)}`;
@@ -730,27 +727,25 @@ function renderRequests(docs) {
             case 'Malattia':
                 periodo = `${formatDate(data.dataInizio)} - ${formatDate(data.dataFine)}`;
                 dettagli = `Cert. n. ${escapeHtml(data.numeroCertificato || '')}`;
+                if (data.attachment) {
+                    dettagli += ` <button class="btn-small download-attachment" data-attachment='${JSON.stringify(data.attachment)}'>📎 Scarica PDF</button>`;
+                }
                 break;
             case 'Permesso':
                 periodo = formatDate(data.data);
                 dettagli = `${data.oraInizio} - ${data.oraFine}`;
-                if (data.motivazione) {
-                    dettagli += ` (${escapeHtml(data.motivazione)})`;
-                }
+                if (data.motivazione) dettagli += ` (${escapeHtml(data.motivazione)})`;
                 break;
         }
         
         const row = document.createElement('tr');
-        row.setAttribute('data-request-id', doc.id);
-        
         const showEditButton = !appState.isAdmin && data.stato === 'In attesa';
         
-        // Costruisci la riga
         row.innerHTML = `
             <td data-label="Tipo">${escapeHtml(data.tipo)}</td>
             <td data-label="Nome">${escapeHtml(data.userName)}</td>
             <td data-label="Periodo">${escapeHtml(periodo)}</td>
-            <td data-label="Dettagli">${escapeHtml(dettagli)}</td>
+            <td data-label="Dettagli">${dettagli}</td>
             <td data-label="Stato">
                 <span class="status-badge ${data.stato.toLowerCase().replace(' ', '-')}">
                     ${escapeHtml(data.stato)}
@@ -761,12 +756,25 @@ function renderRequests(docs) {
             </td>
         `;
         
-        // Aggiungi event listeners
-        attachRequestEventListeners(row, doc.id, data);
+        // Listener per download allegati
+        const downloadBtn = row.querySelector('.download-attachment');
+        if (downloadBtn) {
+            downloadBtn.addEventListener('click', () => {
+                const attachmentData = JSON.parse(downloadBtn.getAttribute('data-attachment'));
+                if (attachmentData && attachmentData.data) {
+                    const link = document.createElement('a');
+                    link.href = attachmentData.data;
+                    link.download = attachmentData.name || 'certificato.pdf';
+                    link.click();
+                }
+            });
+        }
         
+        attachRequestEventListeners(row, doc.id, data);
         richiesteBody.appendChild(row);
     });
 }
+
 
 // Funzione helper per renderizzare le azioni
 function renderActionsCell(requestId, data, showEditButton) {
@@ -1034,6 +1042,7 @@ async function handleMalattiaSubmit(e) {
     const dataFine = new Date(document.getElementById('malattiaDataFine').value);
     const numeroCertificato = document.getElementById('malattiaNumeroCertificato')?.value?.trim();
     const dataCertificato = document.getElementById('malattiaDataCertificato')?.value;
+    const attachmentFile = document.getElementById('malattiaAttachment')?.files[0];
     
     if (dataFine < dataInizio) {
         showFeedback('Errore', 'La data di fine non può essere precedente alla data di inizio');
@@ -1051,6 +1060,21 @@ async function handleMalattiaSubmit(e) {
     }
     
     try {
+        const submitBtn = e.target.querySelector('button[type="submit"]');
+        setLoadingState(submitBtn, true);
+        
+        let attachmentData = null;
+        if (attachmentFile) {
+            try {
+                attachmentData = await uploadAttachment(attachmentFile, 'Malattia');
+                showToast('Certificato caricato con successo', 'success');
+            } catch (uploadError) {
+                showFeedback('Errore', uploadError.message);
+                setLoadingState(submitBtn, false);
+                return;
+            }
+        }
+        
         await db.collection('richieste').add({
             tipo: 'Malattia',
             userId: appState.currentUser.uid,
@@ -1060,7 +1084,8 @@ async function handleMalattiaSubmit(e) {
             numeroCertificato: sanitizeInput(numeroCertificato),
             dataCertificato: firebase.firestore.Timestamp.fromDate(new Date(dataCertificato)),
             stato: 'In attesa',
-            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+            createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+            attachment: attachmentData
         });
         
         document.getElementById('malattiaForm').reset();
@@ -1069,8 +1094,49 @@ async function handleMalattiaSubmit(e) {
         
     } catch (error) {
         handleError(error, 'handleMalattiaSubmit');
+    } finally {
+        const submitBtn = e.target.querySelector('button[type="submit"]');
+        setLoadingState(submitBtn, false);
     }
 }
+
+// Aggiungi campo file al form malattia nell'HTML (aggiungi dopo data certificato)
+function addAttachmentFieldToMalattiaForm() {
+    const malattiaForm = document.getElementById('malattiaForm');
+    if (!malattiaForm) return;
+    
+    const dataCertGroup = document.querySelector('#malattiaForm .form-row:last-child');
+    if (dataCertGroup && !document.getElementById('malattiaAttachment')) {
+        const attachmentGroup = document.createElement('div');
+        attachmentGroup.className = 'form-group file-upload-group';
+        attachmentGroup.innerHTML = `
+            <label class="form-label">Certificato Medico (PDF)</label>
+            <label class="file-upload-label">
+                📎 Seleziona PDF
+                <input type="file" id="malattiaAttachment" class="file-upload-input" accept=".pdf" />
+            </label>
+            <div class="attachment-info" id="attachmentInfo"></div>
+            <small class="form-help">Max 5MB, solo PDF</small>
+        `;
+        
+        dataCertGroup.parentNode.insertBefore(attachmentGroup, dataCertGroup.nextSibling);
+        
+        const fileInput = document.getElementById('malattiaAttachment');
+        const infoDiv = document.getElementById('attachmentInfo');
+        
+        if (fileInput && infoDiv) {
+            fileInput.addEventListener('change', (e) => {
+                if (e.target.files.length > 0) {
+                    infoDiv.textContent = `📄 ${e.target.files[0].name} (${(e.target.files[0].size / 1024).toFixed(1)} KB)`;
+                    infoDiv.style.color = '#27ae60';
+                } else {
+                    infoDiv.textContent = '';
+                }
+            });
+        }
+    }
+}
+
 
 async function handlePermessiSubmit(e) {
     e.preventDefault();
@@ -1658,50 +1724,32 @@ function exportToExcel() {
 }
 
 // ==================== UI SETUP ====================
-function setupUI() {
-    const userData = appState.currentUserData;
-    const isAdmin = appState.isAdmin;
+function setupUIWithCalendar() {
+    setupUI(); // Chiama la funzione originale
     
-    // Mostra nome utente
-    const loggedInUser = document.getElementById('loggedInUser');
-    if (loggedInUser) {
-        loggedInUser.textContent = `${escapeHtml(userData.name)}${isAdmin ? ' (Admin)' : ''}`;
+    const calendarSection = document.getElementById('calendarSection');
+    if (calendarSection && appState.isAdmin) {
+        calendarSection.style.display = 'block';
+        loadCalendarData();
+        initNotifications();
+    } else if (calendarSection) {
+        calendarSection.style.display = 'none';
     }
     
-    // Mostra/nascondi controlli admin
-    const adminControls = document.getElementById('adminControls');
-    if (adminControls) {
-        adminControls.style.display = isAdmin ? 'block' : 'none';
-    }
-    
-    // Mostra/nascondi form richieste
-    const requestForms = document.getElementById('requestForms');
-    if (requestForms) {
-        requestForms.style.display = isAdmin ? 'none' : 'block';
-    }
-    
-    // Mostra sezione cambio password se necessaria
-    showPasswordSectionIfNeeded();
-    
-    // Imposta nome nei form
-    const nameFields = ['ferieNome', 'malattiaNome', 'permessiNome'];
-    nameFields.forEach(id => {
-        const field = document.getElementById(id);
-        if (field) field.value = userData.name;
-    });
-    
-    // Mostra app principale
-    const loginContainer = document.getElementById('loginContainer');
-    const mainContainer = document.getElementById('mainContainer');
-    if (loginContainer) loginContainer.style.display = 'none';
-    if (mainContainer) mainContainer.style.display = 'block';
-    
-    // Carica richieste
-    loadRequests();
-    setupRealtimeListener();
-    
-    announceToScreenReader(`Accesso effettuato come ${userData.name}`);
+    addAttachmentFieldToMalattiaForm();
 }
+
+// Aggiungi event listener per calendario
+function initCalendarEvents() {
+    const prevMonthBtn = document.getElementById('prevMonth');
+    const nextMonthBtn = document.getElementById('nextMonth');
+    const todayBtn = document.getElementById('todayBtn');
+    
+    if (prevMonthBtn) prevMonthBtn.addEventListener('click', () => changeMonth(-1));
+    if (nextMonthBtn) nextMonthBtn.addEventListener('click', () => changeMonth(1));
+    if (todayBtn) todayBtn.addEventListener('click', goToToday);
+}
+
 
 function setupRealtimeListener() {
     if (appState.realtimeListener) {
@@ -2631,59 +2679,398 @@ function highlightEditedRequest(requestId) {
         }
     }
 }
-// ==================== INITIALIZATION ====================
-function initializeApp() {
-    initializeModals();
-     initializeEditModal();
-       setupEditDialogReset();
-    initializeEventListeners();
-    initPasswordToggle();
-    initPasswordStrengthChecker();
-    setupFirebaseAuth();
+// ==================== CALENDARIO ASSENZE ====================
+let currentCalendarDate = new Date();
+let allAbsences = [];
+
+async function loadCalendarData() {
+    if (!appState.isAdmin) return;
     
-    // Aggiungi stili per skeleton loading
+    try {
+        const year = currentCalendarDate.getFullYear();
+        const month = currentCalendarDate.getMonth();
+        const startDate = new Date(year, month, 1);
+        const endDate = new Date(year, month + 1, 1);
+        
+        const snapshot = await db.collection('richieste')
+            .where('stato', '==', 'Approvato')
+            .get();
+        
+        allAbsences = [];
+        snapshot.forEach(doc => {
+            const data = doc.data();
+            let absenceDays = [];
+            
+            if (data.tipo === 'Permesso') {
+                const date = data.data?.toDate();
+                if (date && date >= startDate && date < endDate) {
+                    absenceDays.push({
+                        date: date,
+                        type: data.tipo,
+                        userName: data.userName,
+                        details: `${data.oraInizio}-${data.oraFine}`,
+                        requestId: doc.id
+                    });
+                }
+            } else {
+                const start = data.dataInizio?.toDate();
+                const end = data.dataFine?.toDate();
+                if (start && end && end >= startDate && start < endDate) {
+                    let current = new Date(Math.max(start, startDate));
+                    const endLimit = new Date(Math.min(end, new Date(endDate - 1)));
+                    
+                    while (current <= endLimit) {
+                        const dayOfWeek = current.getDay();
+                        if (dayOfWeek !== 0 && dayOfWeek !== 6) {
+                            absenceDays.push({
+                                date: new Date(current),
+                                type: data.tipo,
+                                userName: data.userName,
+                                details: data.tipo === 'Malattia' ? 
+                                    `Cert. ${data.numeroCertificato || 'N/D'}` : 
+                                    `${data.giorni || 1} giorni`,
+                                requestId: doc.id,
+                                attachment: data.attachmentUrl || null
+                            });
+                        }
+                        current.setDate(current.getDate() + 1);
+                    }
+                }
+            }
+            
+            allAbsences.push(...absenceDays);
+        });
+        
+        renderCalendar();
+        checkTodayAbsences();
+        
+    } catch (error) {
+        console.error('Errore caricamento calendario:', error);
+    }
+}
+
+function renderCalendar() {
+    const year = currentCalendarDate.getFullYear();
+    const month = currentCalendarDate.getMonth();
+    
+    const firstDay = new Date(year, month, 1);
+    const lastDay = new Date(year, month + 1, 0);
+    const startDayOfWeek = firstDay.getDay();
+    
+    const daysInMonth = lastDay.getDate();
+    const daysFromPrevMonth = startDayOfWeek === 0 ? 6 : startDayOfWeek - 1;
+    
+    const calendarGrid = document.getElementById('calendarGrid');
+    if (!calendarGrid) return;
+    
+    // Aggiorna titolo mese
+    const monthNames = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 
+                        'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'];
+    const currentMonthSpan = document.getElementById('currentMonthYear');
+    if (currentMonthSpan) {
+        currentMonthSpan.textContent = `${monthNames[month]} ${year}`;
+    }
+    
+    // Crea intestazione giorni
+    const weekDays = ['Lun', 'Mar', 'Mer', 'Gio', 'Ven', 'Sab', 'Dom'];
+    calendarGrid.innerHTML = weekDays.map(day => 
+        `<div class="calendar-weekday">${day}</div>`
+    ).join('');
+    
+    // Giorni mese precedente
+    const prevMonthDate = new Date(year, month, 0);
+    const prevMonthDays = prevMonthDate.getDate();
+    for (let i = daysFromPrevMonth - 1; i >= 0; i--) {
+        const dayNum = prevMonthDays - i;
+        const date = new Date(year, month - 1, dayNum);
+        calendarGrid.appendChild(createCalendarDay(date, dayNum, true));
+    }
+    
+    // Giorni mese corrente
+    for (let i = 1; i <= daysInMonth; i++) {
+        const date = new Date(year, month, i);
+        calendarGrid.appendChild(createCalendarDay(date, i, false));
+    }
+    
+    // Giorni mese successivo
+    const totalCells = Math.ceil((daysFromPrevMonth + daysInMonth) / 7) * 7;
+    const remainingCells = totalCells - (daysFromPrevMonth + daysInMonth);
+    for (let i = 1; i <= remainingCells; i++) {
+        const date = new Date(year, month + 1, i);
+        calendarGrid.appendChild(createCalendarDay(date, i, true));
+    }
+}
+
+function createCalendarDay(date, dayNum, isOtherMonth) {
+    const dayDiv = document.createElement('div');
+    dayDiv.className = 'calendar-day';
+    if (isOtherMonth) dayDiv.classList.add('other-month');
+    
+    const today = new Date();
+    if (date.toDateString() === today.toDateString()) {
+        dayDiv.classList.add('today');
+    }
+    
+    const dayNumber = document.createElement('div');
+    dayNumber.className = 'day-number';
+    dayNumber.textContent = dayNum;
+    dayDiv.appendChild(dayNumber);
+    
+    // Aggiungi badge assenze
+    const absencesOnDay = allAbsences.filter(absence => 
+        absence.date.toDateString() === date.toDateString()
+    );
+    
+    absencesOnDay.forEach(absence => {
+        const badge = document.createElement('span');
+        badge.className = `absence-badge ${absence.type.toLowerCase()}`;
+        badge.textContent = `${absence.userName.split(' ')[0]}`;
+        badge.title = `${absence.userName} - ${absence.type}${absence.details ? ` (${absence.details})` : ''}`;
+        badge.onclick = (e) => {
+            e.stopPropagation();
+            showAbsenceDetails(date, absencesOnDay);
+        };
+        dayDiv.appendChild(badge);
+    });
+    
+    dayDiv.onclick = () => {
+        if (absencesOnDay.length > 0) {
+            showAbsenceDetails(date, absencesOnDay);
+        }
+    };
+    
+    return dayDiv;
+}
+
+function showAbsenceDetails(date, absences) {
+    const detailsDiv = document.getElementById('absenceDetails');
+    const absenceList = document.getElementById('absenceList');
+    
+    if (!detailsDiv || !absenceList) return;
+    
+    absenceList.innerHTML = '';
+    absences.forEach(absence => {
+        const item = document.createElement('div');
+        item.className = 'absence-item';
+        item.innerHTML = `
+            <strong>${escapeHtml(absence.userName)}</strong>
+            <span class="absence-type ${absence.type.toLowerCase()}">${absence.type}</span>
+            <span>${absence.details || ''}</span>
+            ${absence.attachment ? 
+                `<button class="btn-small download-attachment" data-url="${absence.attachment}">📎 Scarica Certificato</button>` : 
+                ''}
+        `;
+        absenceList.appendChild(item);
+    });
+    
+    // Aggiungi listener per download allegati
+    absenceList.querySelectorAll('.download-attachment').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const url = btn.getAttribute('data-url');
+            if (url) window.open(url, '_blank');
+        });
+    });
+    
+    detailsDiv.style.display = 'block';
+    detailsDiv.scrollIntoView({ behavior: 'smooth' });
+}
+
+function changeMonth(delta) {
+    currentCalendarDate.setMonth(currentCalendarDate.getMonth() + delta);
+    loadCalendarData();
+}
+
+function goToToday() {
+    currentCalendarDate = new Date();
+    loadCalendarData();
+}
+
+// ==================== NOTIFICHE ASSENZE ====================
+let notificationsEnabled = false;
+
+async function checkTodayAbsences() {
+    if (!appState.isAdmin) return;
+    
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    const todayAbsences = allAbsences.filter(absence => 
+        absence.date.toDateString() === today.toDateString()
+    );
+    
+    if (todayAbsences.length > 0) {
+        const message = `📋 Oggi ci sono ${todayAbsences.length} assenze: ${todayAbsences.map(a => a.userName).join(', ')}`;
+        
+        // Mostra alert visivo
+        showToast(message, 'warning');
+        announceToScreenReader(message);
+        
+        // Notifica desktop
+        if (notificationsEnabled && Notification.permission === 'granted') {
+            new Notification('📅 Assenze Oggi', {
+                body: message,
+                icon: '/favicon.ico',
+                tag: 'daily-absences'
+            });
+        }
+        
+        // Invia email notifica (opzionale - richiede EmailJS configurato)
+        await sendAbsenceNotificationEmail(todayAbsences);
+    }
+}
+
+async function sendAbsenceNotificationEmail(absences) {
+    // Solo se EmailJS è configurato
+    if (typeof emailjs === 'undefined' || EMAILJS_CONFIG.publicKey === 'YOUR_PUBLIC_KEY') {
+        console.log('EmailJS non configurato - notifica email saltata');
+        return;
+    }
+    
+    try {
+        const adminEmail = appState.currentUser?.email;
+        if (!adminEmail) return;
+        
+        const absenceList = absences.map(a => 
+            `- ${a.userName}: ${a.type}${a.details ? ` (${a.details})` : ''}`
+        ).join('\n');
+        
+        const templateParams = {
+            to_email: adminEmail,
+            subject: `📅 Notifica Assenze - ${new Date().toLocaleDateString('it-IT')}`,
+            message: `Sono state rilevate le seguenti assenze per oggi:\n\n${absenceList}\n\nAccedi al sistema per maggiori dettagli.`,
+            date: new Date().toLocaleString('it-IT')
+        };
+        
+        await emailjs.send(
+            EMAILJS_CONFIG.serviceId,
+            EMAILJS_CONFIG.templateId,
+            templateParams,
+            EMAILJS_CONFIG.publicKey
+        );
+        
+        console.log('Email notifica inviata');
+    } catch (error) {
+        console.error('Errore invio email notifica:', error);
+    }
+}
+
+function initNotifications() {
+    if (!('Notification' in window)) {
+        console.log('Questo browser non supporta le notifiche');
+        return;
+    }
+    
+    const banner = document.getElementById('notificationPermission');
+    if (!banner) return;
+    
+    if (Notification.permission === 'granted') {
+        notificationsEnabled = true;
+        banner.style.display = 'none';
+    } else if (Notification.permission !== 'denied') {
+        banner.style.display = 'flex';
+        
+        const enableBtn = document.getElementById('enableNotifications');
+        if (enableBtn) {
+            enableBtn.addEventListener('click', async () => {
+                const permission = await Notification.requestPermission();
+                if (permission === 'granted') {
+                    notificationsEnabled = true;
+                    banner.style.display = 'none';
+                    showToast('Notifiche attivate! Riceverai avvisi sulle assenze', 'success');
+                }
+            });
+        }
+    }
+}
+
+// ==================== ALLEGATI CERTIFICATI ====================
+async function uploadAttachment(file, requestType) {
+    if (requestType !== 'Malattia') return null;
+    
+    return new Promise((resolve, reject) => {
+        if (!file || file.type !== 'application/pdf') {
+            reject(new Error('Solo file PDF sono supportati'));
+            return;
+        }
+        
+        if (file.size > 5 * 1024 * 1024) {
+            reject(new Error('Il file non può superare i 5MB'));
+            return;
+        }
+        
+        // Usa FileReader per convertire in base64 (alternativa a storage)
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            resolve({
+                name: file.name,
+                data: e.target.result,
+                size: file.size,
+                type: file.type,
+                uploadDate: new Date().toISOString()
+            });
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+    });
+}
+
+// ==================== INITIALIZATION ====================
+function initializeAppWithFeatures() {
+    // Chiama initializeApp originale
+    if (typeof initializeApp === 'function') {
+        initializeApp();
+    } else {
+        initializeModals();
+        initializeEditModal();
+        setupEditDialogReset();
+        initializeEventListeners();
+        initPasswordToggle();
+        initPasswordStrengthChecker();
+        setupFirebaseAuth();
+    }
+    
+    // Aggiungi nuove funzionalità
+    initCalendarEvents();
+    
+    // Override setupUI
+    const originalSetupUI = window.setupUI;
+    window.setupUI = setupUIWithCalendar;
+    
+    // Override renderRequests
+    window.renderRequests = renderRequestsWithAttachments;
+    
+    // Override handleMalattiaSubmit
+    window.handleMalattiaSubmit = handleMalattiaSubmit;
+    
+    // Aggiungi stili dinamici
     const style = document.createElement('style');
     style.textContent = `
-        @keyframes pulse {
-            0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(243, 156, 18, 0.7); }
-            70% { transform: scale(1.05); box-shadow: 0 0 0 10px rgba(243, 156, 18, 0); }
-            100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(243, 156, 18, 0); }
+        @keyframes slideDown {
+            from { opacity: 0; transform: translateY(-20px); }
+            to { opacity: 1; transform: translateY(0); }
         }
-        
-        .skeleton {
-            background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
-            background-size: 200% 100%;
-            animation: loading 1.5s infinite;
-            border-radius: 4px;
+        .btn-small.download-attachment {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            padding: 2px 8px;
+            border-radius: 12px;
+            cursor: pointer;
+            font-size: 0.7rem;
+            margin-left: 5px;
         }
-        
-        @keyframes loading {
-            0% { background-position: 200% 0; }
-            100% { background-position: -200% 0; }
-        }
-        
-        .current-user {
-            background-color: rgba(66, 133, 244, 0.1);
-        }
-        
-        .password-strength {
-            font-size: 12px;
-            margin-top: 4px;
-        }
-        
-        .password-strength.weak {
-            color: #dc3545;
-        }
-        
-        .password-strength.medium {
-            color: #ffc107;
-        }
-        
-        .password-strength.strong {
-            color: #28a745;
+        .btn-small.download-attachment:hover {
+            background: #45a049;
         }
     `;
     document.head.appendChild(style);
+}
+
+// Avvio applicazione con nuove funzionalità
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initializeAppWithFeatures);
+} else {
+    initializeAppWithFeatures();
 }
 
 // Avvio applicazione

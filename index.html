@@ -170,7 +170,27 @@
                         <button id="nextEmployeesPage" class="btn btn-pagination" disabled aria-label="Pagina successiva">Successiva</button>
                     </div>
                 </div>
+<!-- Calendario Assenze (solo admin) -->
+<section id="calendarSection" class="calendar-section" style="display: none;" aria-labelledby="calendar-title">
+    <h2 id="calendar-title">📅 Calendario Assenze</h2>
+    <div class="calendar-controls">
+        <button id="prevMonth" class="btn btn-secondary">◀ Mese Precedente</button>
+        <span id="currentMonthYear" class="current-month"></span>
+        <button id="nextMonth" class="btn btn-secondary">Mese Successivo ▶</button>
+        <button id="todayBtn" class="btn btn-primary">Oggi</button>
+    </div>
+    <div id="calendarGrid" class="calendar-grid"></div>
+    <div id="absenceDetails" class="absence-details" style="display: none;">
+        <h3>Dettagli Assenze</h3>
+        <div id="absenceList"></div>
+    </div>
+</section>
 
+<!-- Notifiche Desktop -->
+<div id="notificationPermission" class="notification-banner" style="display: none;">
+    <p>🔔 Abilita le notifiche per ricevere avvisi sulle assenze giornaliere</p>
+    <button id="enableNotifications" class="btn btn-primary btn-small">Abilita Notifiche</button>
+</div>
                 <div id="adminFilters" class="filters-section" aria-labelledby="filters-title">
                     <h3 id="filters-title">Filtri Ricerca</h3>
                     <div class="filter-grid">

@@ -1359,3 +1359,249 @@ tr.current-user {
     border-color: var(--danger);
     box-shadow: 0 0 0 3px rgba(231, 76, 60, 0.1);
 }
+/* ===== CALENDARIO ASSENZE ===== */
+.calendar-section {
+    background: white;
+    padding: 1.5rem;
+    border-radius: var(--radius-lg);
+    margin: 1.5rem 0;
+    box-shadow: var(--shadow-md);
+}
+
+.calendar-controls {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1.5rem;
+    flex-wrap: wrap;
+    gap: 1rem;
+}
+
+.current-month {
+    font-size: 1.5rem;
+    font-weight: bold;
+    color: var(--primary);
+}
+
+.calendar-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 8px;
+    margin-bottom: 1.5rem;
+}
+
+.calendar-weekday {
+    text-align: center;
+    font-weight: bold;
+    padding: 12px;
+    background: var(--gradient-hero);
+    color: white;
+    border-radius: var(--radius-sm);
+}
+
+.calendar-day {
+    min-height: 100px;
+    background: #f8f9fa;
+    border-radius: var(--radius-sm);
+    padding: 8px;
+    border: 1px solid #e1e8ed;
+    transition: var(--transition-fast);
+    cursor: pointer;
+    position: relative;
+}
+
+.calendar-day:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-md);
+    border-color: var(--primary);
+}
+
+.calendar-day.today {
+    background: linear-gradient(135deg, #fff3e0, #ffe8cc);
+    border: 2px solid var(--warning);
+}
+
+.calendar-day.other-month {
+    opacity: 0.5;
+}
+
+.day-number {
+    font-weight: bold;
+    font-size: 1.1rem;
+    margin-bottom: 8px;
+    display: inline-block;
+    background: var(--primary);
+    color: white;
+    width: 30px;
+    height: 30px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+}
+
+.absence-badge {
+    display: inline-block;
+    padding: 2px 6px;
+    margin: 2px;
+    border-radius: 12px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: var(--transition-fast);
+}
+
+.absence-badge.ferie {
+    background: #4CAF50;
+    color: white;
+}
+
+.absence-badge.malattia {
+    background: #f44336;
+    color: white;
+}
+
+.absence-badge.permesso {
+    background: #FF9800;
+    color: white;
+}
+
+.absence-badge:hover {
+    transform: scale(1.05);
+}
+
+.absence-details {
+    margin-top: 1.5rem;
+    padding: 1rem;
+    background: #f8f9fa;
+    border-radius: var(--radius-md);
+    border-left: 4px solid var(--primary);
+}
+
+.absence-details h3 {
+    margin-bottom: 1rem;
+    color: var(--primary);
+}
+
+.absence-item {
+    padding: 0.75rem;
+    border-bottom: 1px solid #e1e8ed;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.absence-item:last-child {
+    border-bottom: none;
+}
+
+.absence-type {
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 0.8rem;
+    font-weight: bold;
+}
+
+/* ===== NOTIFICATION BANNER ===== */
+.notification-banner {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 1rem;
+    border-radius: var(--radius-md);
+    margin: 1rem 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 1rem;
+    animation: slideDown var(--transition-base);
+}
+
+.notification-banner p {
+    margin: 0;
+}
+
+/* ===== ALLEGATI ===== */
+.file-upload-group {
+    margin-bottom: 1rem;
+}
+
+.file-upload-label {
+    display: inline-block;
+    padding: 0.5rem 1rem;
+    background: var(--primary);
+    color: white;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: var(--transition-fast);
+}
+
+.file-upload-label:hover {
+    background: var(--primary-dark);
+}
+
+.file-upload-input {
+    display: none;
+}
+
+.attachment-info {
+    margin-top: 0.5rem;
+    font-size: 0.8rem;
+    color: var(--secondary);
+}
+
+.attachment-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 2px 8px;
+    background: #e8f5e9;
+    border-radius: 12px;
+    font-size: 0.7rem;
+    color: #2e7d32;
+}
+
+.download-attachment {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 1rem;
+    margin-left: 0.5rem;
+    color: var(--primary);
+}
+
+/* Responsive calendario */
+@media (max-width: 768px) {
+    .calendar-grid {
+        gap: 4px;
+    }
+    
+    .calendar-day {
+        min-height: 80px;
+        font-size: 0.8rem;
+    }
+    
+    .day-number {
+        width: 24px;
+        height: 24px;
+        font-size: 0.9rem;
+    }
+    
+    .absence-badge {
+        font-size: 0.6rem;
+        padding: 1px 4px;
+    }
+}
+
+@media (max-width: 640px) {
+    .calendar-day {
+        min-height: 60px;
+    }
+    
+    .absence-badge {
+        display: block;
+        margin: 2px 0;
+    }
+}

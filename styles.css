@@ -1352,7 +1352,7 @@ tr.current-user {
 /* Stile per campi non validi */
 .form-control.invalid {
     border-color: var(--danger);
-    background-color: #fff8f8;
+    background-color: #ffffff;
 }
 
 .form-control.invalid:focus {
@@ -1361,7 +1361,7 @@ tr.current-user {
 }
 /* ===== CALENDARIO ASSENZE ===== */
 .calendar-section {
-    background: white;
+    background: rgb(7, 7, 7);
     padding: 1.5rem;
     border-radius: var(--radius-lg);
     margin: 1.5rem 0;
@@ -1401,7 +1401,7 @@ tr.current-user {
 
 .calendar-day {
     min-height: 100px;
-    background: #f8f9fa;
+    background: #ffffff;
     border-radius: var(--radius-sm);
     padding: 8px;
     border: 1px solid #e1e8ed;
@@ -1473,7 +1473,7 @@ tr.current-user {
 .absence-details {
     margin-top: 1.5rem;
     padding: 1rem;
-    background: #f8f9fa;
+    background: #0c0c0c;
     border-radius: var(--radius-md);
     border-left: 4px solid var(--primary);
 }
@@ -1523,85 +1523,3 @@ tr.current-user {
     margin: 0;
 }
 
-/* ===== ALLEGATI ===== */
-.file-upload-group {
-    margin-bottom: 1rem;
-}
-
-.file-upload-label {
-    display: inline-block;
-    padding: 0.5rem 1rem;
-    background: var(--primary);
-    color: white;
-    border-radius: var(--radius-sm);
-    cursor: pointer;
-    transition: var(--transition-fast);
-}
-
-.file-upload-label:hover {
-    background: var(--primary-dark);
-}
-
-.file-upload-input {
-    display: none;
-}
-
-.attachment-info {
-    margin-top: 0.5rem;
-    font-size: 0.8rem;
-    color: var(--secondary);
-}
-
-.attachment-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.25rem;
-    padding: 2px 8px;
-    background: #e8f5e9;
-    border-radius: 12px;
-    font-size: 0.7rem;
-    color: #2e7d32;
-}
-
-.download-attachment {
-    background: none;
-    border: none;
-    cursor: pointer;
-    font-size: 1rem;
-    margin-left: 0.5rem;
-    color: var(--primary);
-}
-
-/* Responsive calendario */
-@media (max-width: 768px) {
-    .calendar-grid {
-        gap: 4px;
-    }
-    
-    .calendar-day {
-        min-height: 80px;
-        font-size: 0.8rem;
-    }
-    
-    .day-number {
-        width: 24px;
-        height: 24px;
-        font-size: 0.9rem;
-    }
-    
-    .absence-badge {
-        font-size: 0.6rem;
-        padding: 1px 4px;
-    }
-}
-
-@media (max-width: 640px) {
-    .calendar-day {
-        min-height: 60px;
-    }
-    
-    .absence-badge {
-        display: block;
-        margin: 2px 0;
-    }
-}

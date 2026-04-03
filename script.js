@@ -472,49 +472,89 @@ async function loadRequests() {
     richiesteBody.innerHTML = `<tr><td colspan="6" class="text-center"><div class="loading-spinner"></div> Caricamento...</td></tr>`;
     
     try {
+        let allDocs = [];
         let query = db.collection('richieste');
         
-        if (!appState.isAdmin && appState.currentUser) {
-            query = query.where('userId', '==', appState.currentUser.uid);
-        } else if (appState.isAdmin) {
-            if (appState.filters.type) {
-                query = query.where('tipo', '==', appState.filters.type);
-            }
-            if (appState.filters.status) {
-                query = query.where('stato', '==', appState.filters.status);
-            }
-        }
-        
-        if (appState.filters.year || appState.filters.month) {
-            const year = appState.filters.year ? parseInt(appState.filters.year) : new Date().getFullYear();
-            const month = appState.filters.month ? parseInt(appState.filters.month) - 1 : 0;
-            const startDate = new Date(year, month, 1);
-            const endDate = appState.filters.month ? new Date(year, month + 1, 1) : new Date(year + 1, 0, 1);
-            const dateField = appState.filters.type === 'Permesso' ? 'data' : 'dataInizio';
+        // Per admin: applica filtri base su Firestore solo per tipo e stato
+        if (appState.isAdmin) {
+            // Costruisci query base
+            let firestoreQuery = db.collection('richieste');
             
-            query = query.orderBy(dateField, 'desc').where(dateField, '>=', startDate).where(dateField, '<', endDate);
+            // Filtro per tipo (solo se selezionato e non vuoto)
+            if (appState.filters.type && appState.filters.type !== '') {
+                firestoreQuery = firestoreQuery.where('tipo', '==', appState.filters.type);
+            }
+            
+            // Filtro per stato (solo se selezionato e non vuoto)
+            if (appState.filters.status && appState.filters.status !== '') {
+                firestoreQuery = firestoreQuery.where('stato', '==', appState.filters.status);
+            }
+            
+            // Ordina per data di creazione
+            firestoreQuery = firestoreQuery.orderBy('createdAt', 'desc');
+            
+            const snapshot = await firestoreQuery.get();
+            allDocs = snapshot.docs;
+            
         } else {
-            query = query.orderBy('createdAt', 'desc');
+            // Per dipendente normale: solo le sue richieste
+            const snapshot = await db.collection('richieste')
+                .where('userId', '==', appState.currentUser.uid)
+                .orderBy('createdAt', 'desc')
+                .get();
+            allDocs = snapshot.docs;
         }
         
-        const snapshot = await query.get();
-        let docs = snapshot.docs;
+        // Filtri lato client (per quelli che non possono essere filtrati direttamente su Firestore)
+        let filteredDocs = allDocs;
         
-        if (appState.isAdmin && appState.filters.employee) {
-            const searchTerm = sanitizeInput(appState.filters.employee).toLowerCase();
-            docs = docs.filter(doc => doc.data().userName?.toLowerCase().includes(searchTerm));
+        if (appState.isAdmin) {
+            // Filtro per dipendente (ricerca testuale)
+            if (appState.filters.employee && appState.filters.employee !== '') {
+                const searchTerm = sanitizeInput(appState.filters.employee).toLowerCase();
+                filteredDocs = filteredDocs.filter(doc => 
+                    doc.data().userName?.toLowerCase().includes(searchTerm)
+                );
+            }
         }
         
-        appState.totalRequests = docs.length;
+        // Filtri per data (lato client per maggiore flessibilità)
+        if (appState.filters.year || appState.filters.month) {
+            const year = appState.filters.year ? parseInt(appState.filters.year) : null;
+            const month = appState.filters.month ? parseInt(appState.filters.month) : null;
+            
+            filteredDocs = filteredDocs.filter(doc => {
+                const data = doc.data();
+                let docDate = null;
+                
+                // Determina la data da usare per il filtro
+                if (data.tipo === 'Permesso') {
+                    docDate = data.data?.toDate();
+                } else {
+                    docDate = data.dataInizio?.toDate();
+                }
+                
+                if (!docDate) return false;
+                
+                let match = true;
+                if (year && docDate.getFullYear() !== year) match = false;
+                if (month && (docDate.getMonth() + 1) !== month) match = false;
+                
+                return match;
+            });
+        }
+        
+        appState.totalRequests = filteredDocs.length;
         updatePagination();
         
         const start = (appState.currentPage - 1) * appState.pageSize;
-        const paginated = docs.slice(start, start + appState.pageSize);
+        const paginated = filteredDocs.slice(start, start + appState.pageSize);
         renderRequests(paginated);
         
     } catch (error) {
+        console.error('Errore loadRequests:', error);
         handleError(error, 'loadRequests');
-        richiesteBody.innerHTML = `<tr><td colspan="6" class="error text-center">Errore nel caricamento delle richieste</td></tr>`;
+        richiesteBody.innerHTML = `<tr><td colspan="6" class="error text-center">Errore nel caricamento delle richieste: ${error.message}</td></tr>`;
     }
 }
 
@@ -1454,15 +1494,40 @@ function goToNextEmployeesPage() {
 
 // ==================== FILTERS ====================
 function applyFilters() {
+    // Recupera i valori dei filtri
+    const filterType = document.getElementById('filterType')?.value || '';
+    const filterEmployee = document.getElementById('filterEmployee')?.value || '';
+    const filterYear = document.getElementById('filterYear')?.value || '';
+    const filterMonth = document.getElementById('filterMonth')?.value || '';
+    const filterStatus = document.getElementById('filterStatus')?.value || '';
+    
+    console.log('Applicazione filtri:', { filterType, filterEmployee, filterYear, filterMonth, filterStatus });
+    
+    // Aggiorna lo stato
     appState.filters = {
-        type: document.getElementById('filterType')?.value || '',
-        employee: sanitizeInput(document.getElementById('filterEmployee')?.value || ''),
-        year: document.getElementById('filterYear')?.value || '',
-        month: document.getElementById('filterMonth')?.value || '',
-        status: document.getElementById('filterStatus')?.value || ''
+        type: filterType,
+        employee: filterEmployee,
+        year: filterYear,
+        month: filterMonth,
+        status: filterStatus
     };
+    
     appState.currentPage = 1;
     loadRequests();
+    
+    // Mostra feedback
+    const activeFilters = [];
+    if (filterType) activeFilters.push(`Tipo: ${filterType}`);
+    if (filterEmployee) activeFilters.push(`Dipendente: ${filterEmployee}`);
+    if (filterYear) activeFilters.push(`Anno: ${filterYear}`);
+    if (filterMonth) activeFilters.push(`Mese: ${parseInt(filterMonth)}`);
+    if (filterStatus) activeFilters.push(`Stato: ${filterStatus}`);
+    
+    if (activeFilters.length > 0) {
+        showToast(`Filtri applicati: ${activeFilters.join(', ')}`, 'info');
+    } else {
+        showToast('Tutti i filtri rimossi', 'info');
+    }
 }
 
 function resetFilters() {
@@ -1481,6 +1546,8 @@ function resetFilters() {
     appState.filters = { type: '', employee: '', year: '', month: '', status: '' };
     appState.currentPage = 1;
     loadRequests();
+    
+    showToast('Filtri resettati', 'info');
 }
 
 // ==================== EXPORT FUNCTIONS ====================

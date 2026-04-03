@@ -1523,3 +1523,35 @@ tr.current-user {
     margin: 0;
 }
 
+/* Indicatore periodo multi-mese */
+.period-multi-month {
+    position: relative;
+}
+
+.period-multi-month::after {
+    content: "📅";
+    font-size: 0.7rem;
+    margin-left: 4px;
+    opacity: 0.7;
+}
+
+/* Badge informativo per filtri */
+.filter-info {
+    background: #e3f2fd;
+    border-radius: 20px;
+    padding: 4px 12px;
+    font-size: 0.75rem;
+    color: #1976d2;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+.multi-month-badge {
+    background: #e3f2fd;
+    color: #1976d2;
+    font-size: 0.65rem;
+    padding: 2px 6px;
+    border-radius: 20px;
+    margin-left: 6px;
+    white-space: nowrap;
+}

@@ -477,27 +477,21 @@ async function loadRequests() {
         
         // Per admin: applica filtri base su Firestore solo per tipo e stato
         if (appState.isAdmin) {
-            // Costruisci query base
             let firestoreQuery = db.collection('richieste');
             
-            // Filtro per tipo (solo se selezionato e non vuoto)
             if (appState.filters.type && appState.filters.type !== '') {
                 firestoreQuery = firestoreQuery.where('tipo', '==', appState.filters.type);
             }
             
-            // Filtro per stato (solo se selezionato e non vuoto)
             if (appState.filters.status && appState.filters.status !== '') {
                 firestoreQuery = firestoreQuery.where('stato', '==', appState.filters.status);
             }
             
-            // Ordina per data di creazione
             firestoreQuery = firestoreQuery.orderBy('createdAt', 'desc');
-            
             const snapshot = await firestoreQuery.get();
             allDocs = snapshot.docs;
             
         } else {
-            // Per dipendente normale: solo le sue richieste
             const snapshot = await db.collection('richieste')
                 .where('userId', '==', appState.currentUser.uid)
                 .orderBy('createdAt', 'desc')
@@ -505,11 +499,11 @@ async function loadRequests() {
             allDocs = snapshot.docs;
         }
         
-        // Filtri lato client (per quelli che non possono essere filtrati direttamente su Firestore)
+        // Filtri lato client
         let filteredDocs = allDocs;
         
         if (appState.isAdmin) {
-            // Filtro per dipendente (ricerca testuale)
+            // Filtro per dipendente
             if (appState.filters.employee && appState.filters.employee !== '') {
                 const searchTerm = sanitizeInput(appState.filters.employee).toLowerCase();
                 filteredDocs = filteredDocs.filter(doc => 
@@ -518,29 +512,53 @@ async function loadRequests() {
             }
         }
         
-        // Filtri per data (lato client per maggiore flessibilità)
+        // FILTRO PER DATA MIGLIORATO - gestisce periodi a cavallo tra mesi
         if (appState.filters.year || appState.filters.month) {
             const year = appState.filters.year ? parseInt(appState.filters.year) : null;
             const month = appState.filters.month ? parseInt(appState.filters.month) : null;
             
             filteredDocs = filteredDocs.filter(doc => {
                 const data = doc.data();
-                let docDate = null;
                 
-                // Determina la data da usare per il filtro
+                // Per i permessi (singolo giorno)
                 if (data.tipo === 'Permesso') {
-                    docDate = data.data?.toDate();
-                } else {
-                    docDate = data.dataInizio?.toDate();
+                    const docDate = data.data?.toDate();
+                    if (!docDate) return false;
+                    
+                    let match = true;
+                    if (year && docDate.getFullYear() !== year) match = false;
+                    if (month && (docDate.getMonth() + 1) !== month) match = false;
+                    return match;
                 }
                 
-                if (!docDate) return false;
+                // Per Ferie e Malattia (periodi)
+                const startDate = data.dataInizio?.toDate();
+                const endDate = data.dataFine?.toDate();
                 
-                let match = true;
-                if (year && docDate.getFullYear() !== year) match = false;
-                if (month && (docDate.getMonth() + 1) !== month) match = false;
+                if (!startDate || !endDate) return false;
                 
-                return match;
+                // Se non ci sono filtri su anno/mese, mostra tutto
+                if (!year && !month) return true;
+                
+                // Ottieni il range del mese/anno da filtrare
+                let filterStartDate, filterEndDate;
+                
+                if (year && month) {
+                    // Filtro per mese specifico
+                    filterStartDate = new Date(year, month - 1, 1);
+                    filterEndDate = new Date(year, month, 0); // Ultimo giorno del mese
+                } else if (year && !month) {
+                    // Filtro solo per anno
+                    filterStartDate = new Date(year, 0, 1);
+                    filterEndDate = new Date(year, 11, 31);
+                } else {
+                    return true;
+                }
+                
+                // Verifica se il periodo si sovrappone con il mese/anno filtrato
+                const overlaps = (startDate <= filterEndDate && endDate >= filterStartDate);
+                
+                return overlaps;
             });
         }
         
@@ -576,18 +594,51 @@ function renderRequests(docs) {
         
         switch (data.tipo) {
             case 'Ferie':
-                periodo = `${formatDate(data.dataInizio)} - ${formatDate(data.dataFine)}`;
-                dettagli = `${data.giorni} giorni`;
+    const start = data.dataInizio?.toDate();
+    const end = data.dataFine?.toDate();
+    const startStr = start ? start.toLocaleDateString('it-IT') : 'N/D';
+    const endStr = end ? end.toLocaleDateString('it-IT') : 'N/D';
+    periodo = `${startStr} - ${endStr}`;
+    
+    // Calcola giorni nel mese filtrato (se c'è un filtro mese attivo)
+    let giorniInfo = `${data.giorni} giorni totali`;
+    if (appState.filters.month && start && end) {
+        const filterMonth = parseInt(appState.filters.month) - 1;
+        const filterYear = appState.filters.year ? parseInt(appState.filters.year) : start.getFullYear();
+        
+        let giorniNelMese = 0;
+        let current = new Date(start);
+        const filterStart = new Date(filterYear, filterMonth, 1);
+        const filterEnd = new Date(filterYear, filterMonth + 1, 0);
+        
+        while (current <= end) {
+            if (current >= filterStart && current <= filterEnd) {
+                const dayOfWeek = current.getDay();
+                if (dayOfWeek !== 0 && dayOfWeek !== 6) giorniNelMese++;
+            }
+            current.setDate(current.getDate() + 1);
+        }
+        
+        if (giorniNelMese > 0 && giorniNelMese < data.giorni) {
+            giorniInfo = `${giorniNelMese} giorni nel mese selezionato (totale ${data.giorni})`;
+        } else if (giorniNelMese === data.giorni) {
+            giorniInfo = `${data.giorni} giorni (interamente nel mese)`;
+        }
+    }
+    
+    dettagli = giorniInfo;
                 break;
             case 'Malattia':
-                periodo = `${formatDate(data.dataInizio)} - ${formatDate(data.dataFine)}`;
+                const malStart = data.dataInizio?.toDate();
+                const malEnd = data.dataFine?.toDate();
+                const malStartStr = malStart ? malStart.toLocaleDateString('it-IT') : 'N/D';
+                const malEndStr = malEnd ? malEnd.toLocaleDateString('it-IT') : 'N/D';
+                periodo = `${malStartStr} - ${malEndStr}`;
                 dettagli = `Cert. n. ${escapeHtml(data.numeroCertificato || '')}`;
-                if (data.attachment) {
-                    dettagli += ` <button class="btn-small download-attachment" data-attachment='${JSON.stringify(data.attachment)}'>📎 Scarica PDF</button>`;
-                }
                 break;
             case 'Permesso':
-                periodo = formatDate(data.data);
+                const permDate = data.data?.toDate();
+                periodo = permDate ? permDate.toLocaleDateString('it-IT') : 'N/D';
                 dettagli = `${data.oraInizio} - ${data.oraFine}`;
                 if (data.motivazione) dettagli += ` (${escapeHtml(data.motivazione)})`;
                 break;
@@ -610,19 +661,6 @@ function renderRequests(docs) {
                 ${renderActionsCell(doc.id, data, showEditButton)}
             </td>
         `;
-        
-        const downloadBtn = row.querySelector('.download-attachment');
-        if (downloadBtn && data.attachment && data.attachment.data) {
-            downloadBtn.addEventListener('click', () => {
-                const attachmentData = data.attachment;
-                if (attachmentData && attachmentData.data) {
-                    const link = document.createElement('a');
-                    link.href = attachmentData.data;
-                    link.download = attachmentData.name || 'certificato.pdf';
-                    link.click();
-                }
-            });
-        }
         
         attachRequestEventListeners(row, doc.id, data);
         richiesteBody.appendChild(row);
@@ -2120,6 +2158,29 @@ function initializeEventListeners() {
             if (dialog) dialog.close();
         });
     }
+    const currentMonthFilter = document.getElementById('currentMonthFilter');
+if (currentMonthFilter) {
+    currentMonthFilter.addEventListener('click', () => {
+        const now = new Date();
+        const yearFilter = document.getElementById('filterYear');
+        const monthFilter = document.getElementById('filterMonth');
+        if (yearFilter) yearFilter.value = now.getFullYear();
+        if (monthFilter) monthFilter.value = now.getMonth() + 1;
+        applyFilters();
+    });
+}
+
+const currentYearFilter = document.getElementById('currentYearFilter');
+if (currentYearFilter) {
+    currentYearFilter.addEventListener('click', () => {
+        const now = new Date();
+        const yearFilter = document.getElementById('filterYear');
+        const monthFilter = document.getElementById('filterMonth');
+        if (yearFilter) yearFilter.value = now.getFullYear();
+        if (monthFilter) monthFilter.value = '';
+        applyFilters();
+    });
+}
 }
 
 function initializeModals() {

@@ -665,6 +665,7 @@ function renderRequests(docs) {
         attachRequestEventListeners(row, doc.id, data);
         richiesteBody.appendChild(row);
     });
+    updateTableDataLabels();
 }
 
 function renderActionsCell(requestId, data, showEditButton) {
@@ -1589,92 +1590,318 @@ function resetFilters() {
 }
 
 // ==================== EXPORT FUNCTIONS ====================
-function exportToPDF() {
+async function exportToPDF() {
     try {
-        const { jsPDF } = window.jspdf;
-        const doc = new jsPDF();
+        showToast('Generazione PDF in corso...', 'info');
         
-        doc.setFontSize(18);
-        doc.text('Elenco Richieste', 105, 15, { align: 'center' });
-        doc.setFontSize(10);
-        doc.text(`Generato il: ${new Date().toLocaleDateString('it-IT')}`, 14, 25);
+        // Mostra loading
+        const exportBtn = document.getElementById('exportPDF');
+        const originalText = exportBtn?.innerHTML;
+        if (exportBtn) exportBtn.innerHTML = '<span class="loading-spinner"></span> Generazione...';
         
-        const headers = [["Tipo", "Dipendente", "Periodo", "Dettagli", "Stato"]];
-        const rows = [];
+        // Recupera TUTTI i dati filtrati (non solo pagina corrente)
+        const allData = await getAllFilteredRequests();
         
-        document.querySelectorAll('#richiesteBody tr').forEach(row => {
-            const cells = row.querySelectorAll('td');
-            if (cells.length >= 5 && !cells[0].textContent.includes('Nessuna')) {
-                rows.push([
-                    cells[0].textContent,
-                    cells[1].textContent,
-                    cells[2].textContent,
-                    cells[3].textContent,
-                    cells[4].textContent
-                ]);
-            }
-        });
-        
-        if (rows.length === 0) {
+        if (allData.length === 0) {
             showFeedback('Info', 'Nessuna richiesta da esportare');
+            if (exportBtn) exportBtn.innerHTML = originalText;
             return;
         }
+        
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF({ orientation: 'landscape' });
+        
+        // Intestazione
+        doc.setFontSize(18);
+        doc.setTextColor(41, 128, 185);
+        doc.text('Gestione Richieste Union14', 14, 15);
+        
+        doc.setFontSize(10);
+        doc.setTextColor(100, 100, 100);
+        const dateStr = new Date().toLocaleDateString('it-IT', { 
+            day: '2-digit', month: '2-digit', year: 'numeric',
+            hour: '2-digit', minute: '2-digit'
+        });
+        doc.text(`Data esportazione: ${dateStr}`, 14, 25);
+        
+        // Filtri attivi
+        let filterText = getActiveFiltersText();
+        if (filterText) {
+            doc.setFontSize(9);
+            doc.setTextColor(150, 150, 150);
+            doc.text(`Filtri applicati: ${filterText}`, 14, 32);
+        }
+        
+        // Prepara dati per tabella
+        const headers = [['Tipo', 'Dipendente', 'Periodo', 'Dettagli', 'Stato', 'Data Richiesta']];
+        const rows = [];
+        
+        allData.forEach(item => {
+            rows.push([
+                item.tipo,
+                item.userName,
+                item.periodo,
+                item.dettagli.length > 40 ? item.dettagli.substring(0, 37) + '...' : item.dettagli,
+                item.stato,
+                item.dataRichiesta
+            ]);
+        });
+        
+        // Calcola altezza tabella
+        const startY = filterText ? 38 : 32;
         
         doc.autoTable({
             head: headers,
             body: rows,
-            startY: 30,
-            styles: { fontSize: 8 },
-            headStyles: { fillColor: [66, 133, 244] }
+            startY: startY,
+            styles: { 
+                fontSize: 8,
+                cellPadding: 3,
+                overflow: 'linebreak'
+            },
+            headStyles: { 
+                fillColor: [41, 128, 185],
+                textColor: 255,
+                fontStyle: 'bold'
+            },
+            alternateRowStyles: { fillColor: [245, 245, 245] },
+            margin: { left: 10, right: 10 }
         });
         
-        doc.save(`richieste_${new Date().toISOString().slice(0, 10)}.pdf`);
-        showToast('PDF generato con successo', 'success');
+        // Aggiungi riepilogo
+        const finalY = doc.lastAutoTable.finalY + 10;
+        doc.setFontSize(9);
+        doc.setTextColor(100, 100, 100);
+        doc.text(`Totale richieste: ${allData.length}`, 14, finalY);
+        
+        // Riepilogo per stato
+        const statoCount = {};
+        allData.forEach(item => {
+            statoCount[item.stato] = (statoCount[item.stato] || 0) + 1;
+        });
+        
+        let summaryText = 'Riepilogo: ';
+        for (const [stato, count] of Object.entries(statoCount)) {
+            summaryText += `${stato}: ${count}  `;
+        }
+        doc.text(summaryText, 14, finalY + 7);
+        
+        // Salva PDF
+        const filename = `richieste_${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.pdf`;
+        doc.save(filename);
+        
+        showToast(`PDF generato con successo (${allData.length} richieste)`, 'success');
+        
+        if (exportBtn) exportBtn.innerHTML = originalText;
+        
     } catch (error) {
+        console.error('Errore export PDF:', error);
         handleError(error, 'exportToPDF');
+        const exportBtn = document.getElementById('exportPDF');
+        if (exportBtn) exportBtn.innerHTML = 'Esporta in PDF';
     }
 }
 
 function exportToExcel() {
     try {
-        const rows = [['Tipo', 'Dipendente', 'Periodo', 'Dettagli', 'Stato']];
+        showToast('Generazione Excel in corso...', 'info');
         
-        document.querySelectorAll('#richiesteBody tr').forEach(row => {
-            const cells = row.querySelectorAll('td');
-            if (cells.length >= 5 && !cells[0].textContent.includes('Nessuna')) {
-                rows.push([
-                    cells[0].textContent,
-                    cells[1].textContent,
-                    cells[2].textContent,
-                    cells[3].textContent,
-                    cells[4].textContent
-                ]);
+        // Raccogli TUTTI i dati dalla tabella corrente (inclusi quelli fuori pagina)
+        // Usiamo la stessa funzione di getAllFilteredRequests per consistenza
+        getAllFilteredRequests().then(allData => {
+            if (allData.length === 0) {
+                showFeedback('Info', 'Nessuna richiesta da esportare');
+                return;
             }
+            
+            // Intestazioni CSV
+            const headers = ['Tipo', 'Dipendente', 'Periodo', 'Dettagli', 'Stato', 'Data Richiesta'];
+            
+            // Prepara righe
+            const rows = [headers];
+            allData.forEach(item => {
+                rows.push([
+                    item.tipo,
+                    item.userName,
+                    item.periodo,
+                    item.dettagli,
+                    item.stato,
+                    item.dataRichiesta
+                ]);
+            });
+            
+            // Converti in CSV
+            const csv = rows.map(row => 
+                row.map(cell => `"${String(cell || '').replace(/"/g, '""')}"`).join(',')
+            ).join('\n');
+            
+            // Aggiungi BOM per UTF-8
+            const blob = new Blob(["\uFEFF" + csv], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement('a');
+            const url = URL.createObjectURL(blob);
+            
+            link.href = url;
+            link.download = `richieste_${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.csv`;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+            
+            showToast(`Esportazione completata (${allData.length} richieste)`, 'success');
+        }).catch(error => {
+            console.error('Errore export Excel:', error);
+            handleError(error, 'exportToExcel');
         });
         
-        if (rows.length === 1) {
-            showFeedback('Info', 'Nessuna richiesta da esportare');
-            return;
-        }
-        
-        const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
-        const blob = new Blob(["\uFEFF" + csv], { type: 'text/csv;charset=utf-8;' });
-        const link = document.createElement('a');
-        const url = URL.createObjectURL(blob);
-        
-        link.href = url;
-        link.download = `richieste_${new Date().toISOString().slice(0, 10)}.csv`;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        URL.revokeObjectURL(url);
-        
-        showToast('Esportazione completata', 'success');
     } catch (error) {
+        console.error('Errore export Excel:', error);
         handleError(error, 'exportToExcel');
     }
 }
 
+// ==================== FUNZIONE PER RECUPERARE TUTTI I DATI FILTRATI ====================
+async function getAllFilteredRequests() {
+    try {
+        // Costruisci query base
+        let query = db.collection('richieste');
+        
+        // Filtri Firestore (solo tipo e stato che possono essere filtrati a livello DB)
+        if (appState.isAdmin) {
+            if (appState.filters.type && appState.filters.type !== '') {
+                query = query.where('tipo', '==', appState.filters.type);
+            }
+            if (appState.filters.status && appState.filters.status !== '') {
+                query = query.where('stato', '==', appState.filters.status);
+            }
+        } else {
+            query = query.where('userId', '==', appState.currentUser.uid);
+        }
+        
+        // Ordina per data creazione
+        query = query.orderBy('createdAt', 'desc');
+        
+        const snapshot = await query.get();
+        let allDocs = snapshot.docs;
+        
+        // Filtri lato client
+        if (appState.isAdmin && appState.filters.employee && appState.filters.employee !== '') {
+            const searchTerm = sanitizeInput(appState.filters.employee).toLowerCase();
+            allDocs = allDocs.filter(doc => 
+                doc.data().userName?.toLowerCase().includes(searchTerm)
+            );
+        }
+        
+        // Filtro per data (anno/mese)
+        if (appState.filters.year || appState.filters.month) {
+            const year = appState.filters.year ? parseInt(appState.filters.year) : null;
+            const month = appState.filters.month ? parseInt(appState.filters.month) : null;
+            
+            allDocs = allDocs.filter(doc => {
+                const data = doc.data();
+                
+                // Permessi (singolo giorno)
+                if (data.tipo === 'Permesso') {
+                    const docDate = data.data?.toDate();
+                    if (!docDate) return false;
+                    
+                    if (year && docDate.getFullYear() !== year) return false;
+                    if (month && (docDate.getMonth() + 1) !== month) return false;
+                    return true;
+                }
+                
+                // Ferie e Malattia (periodi)
+                const startDate = data.dataInizio?.toDate();
+                const endDate = data.dataFine?.toDate();
+                if (!startDate || !endDate) return false;
+                
+                if (!year && !month) return true;
+                
+                let filterStartDate, filterEndDate;
+                
+                if (year && month) {
+                    filterStartDate = new Date(year, month - 1, 1);
+                    filterEndDate = new Date(year, month, 0);
+                } else if (year && !month) {
+                    filterStartDate = new Date(year, 0, 1);
+                    filterEndDate = new Date(year, 11, 31);
+                } else {
+                    return true;
+                }
+                
+                return (startDate <= filterEndDate && endDate >= filterStartDate);
+            });
+        }
+        
+        // Converti in formato leggibile per export
+        const exportData = [];
+        for (const doc of allDocs) {
+            const data = doc.data();
+            let periodo = '', dettagli = '';
+            
+            switch (data.tipo) {
+                case 'Ferie':
+                    const start = data.dataInizio?.toDate();
+                    const end = data.dataFine?.toDate();
+                    periodo = `${start?.toLocaleDateString('it-IT') || 'N/D'} - ${end?.toLocaleDateString('it-IT') || 'N/D'}`;
+                    dettagli = `${data.giorni || 0} giorni`;
+                    break;
+                case 'Malattia':
+                    const malStart = data.dataInizio?.toDate();
+                    const malEnd = data.dataFine?.toDate();
+                    periodo = `${malStart?.toLocaleDateString('it-IT') || 'N/D'} - ${malEnd?.toLocaleDateString('it-IT') || 'N/D'}`;
+                    dettagli = `Cert. n. ${data.numeroCertificato || ''}`;
+                    break;
+                case 'Permesso':
+                    const permDate = data.data?.toDate();
+                    periodo = permDate?.toLocaleDateString('it-IT') || 'N/D';
+                    dettagli = `${data.oraInizio || ''} - ${data.oraFine || ''}`;
+                    if (data.motivazione) dettagli += ` (${data.motivazione})`;
+                    break;
+            }
+            
+            exportData.push({
+                tipo: data.tipo,
+                userName: data.userName,
+                periodo: periodo,
+                dettagli: dettagli,
+                stato: data.stato,
+                dataRichiesta: data.createdAt?.toDate()?.toLocaleDateString('it-IT') || 'N/D'
+            });
+        }
+        
+        return exportData;
+        
+    } catch (error) {
+        console.error('Errore recupero dati:', error);
+        return [];
+    }
+}
+
+function getActiveFiltersText() {
+    const filters = [];
+    if (appState.filters.type) filters.push(`Tipo: ${appState.filters.type}`);
+    if (appState.filters.employee) filters.push(`Dipendente: ${appState.filters.employee}`);
+    if (appState.filters.year) filters.push(`Anno: ${appState.filters.year}`);
+    if (appState.filters.month) {
+        const monthNames = ['Gen', 'Feb', 'Mar', 'Apr', 'Mag', 'Giu', 'Lug', 'Ago', 'Set', 'Ott', 'Nov', 'Dic'];
+        filters.push(`Mese: ${monthNames[parseInt(appState.filters.month) - 1]}`);
+    }
+    if (appState.filters.status) filters.push(`Stato: ${appState.filters.status}`);
+    return filters.join(', ');
+}
+function updateTableDataLabels() {
+    const headers = document.querySelectorAll('.requests-table th');
+    const headerTexts = Array.from(headers).map(th => th.textContent.trim());
+    
+    document.querySelectorAll('.requests-table tbody tr').forEach(row => {
+        const cells = row.querySelectorAll('td');
+        cells.forEach((cell, index) => {
+            if (headerTexts[index]) {
+                cell.setAttribute('data-label', headerTexts[index]);
+            }
+        });
+    });
+}
 // ==================== UI SETUP ====================
 function setupUI() {
     console.log('🎯 setupUI chiamata');

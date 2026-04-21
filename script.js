@@ -27,6 +27,7 @@ const CONSTANTS = {
     EMPLOYEES_PAGE_SIZE: 5,
     TOAST_DURATION: 3000,
     DEBOUNCE_DELAY: 300,
+    ORE_GIORNO_LAVORATIVO: 8,
      ORE_FERIE_ANNUALI: 160,      // 20 giorni * 8 ore
     ORE_PERMESSI_ANNUALI: 103  // 13 giorni * 8 ore
 };

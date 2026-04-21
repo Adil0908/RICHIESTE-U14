@@ -25,7 +25,9 @@ const CONSTANTS = {
     PAGE_SIZE_DEFAULT: 10,
     EMPLOYEES_PAGE_SIZE: 5,
     TOAST_DURATION: 3000,
-    DEBOUNCE_DELAY: 300
+    DEBOUNCE_DELAY: 300,
+     ORE_FERIE_ANNUALI: 160,      // 20 giorni * 8 ore
+    ORE_PERMESSI_ANNUALI: 32   // 4 giorni * 8 ore
 };
 
 // ==================== STATO APPLICAZIONE ====================
@@ -437,6 +439,201 @@ async function handlePasswordReset(e) {
         showFeedback('Errore', getAuthErrorMessage(error));
     }
 }
+// ==================== GESTIONE ORE RESIDUE ====================
+
+// Calcola ore per un periodo di ferie
+function calcolaOreFerie(dataInizio, dataFine) {
+    const giorni = calcolaGiorniLavorativi(dataInizio, dataFine);
+    return giorni * CONSTANTS.ORE_GIORNO_LAVORATIVO;
+}
+
+// Calcola ore per un permesso
+function calcolaOrePermesso(oraInizio, oraFine) {
+    const start = oraInizio.split(':').map(Number);
+    const end = oraFine.split(':').map(Number);
+    let ore = end[0] - start[0];
+    const minuti = end[1] - start[1];
+    if (minuti < 0) {
+        ore -= 1;
+    } else if (minuti > 0) {
+        ore += 0.5;
+    }
+    return Math.max(ore, 0.5);
+}
+
+// Ottieni ore residue di un dipendente
+async function getOreResidue(userId, anno = new Date().getFullYear()) {
+    try {
+        const userDoc = await db.collection('users').doc(userId).get();
+        if (!userDoc.exists) return { oreFerie: 0, orePermessi: 0 };
+        
+        const data = userDoc.data();
+        
+        // Se è il primo anno o reset anno, inizializza
+        if (data.annoCorrente !== anno) {
+            const newData = {
+                annoCorrente: anno,
+                oreFerie: CONSTANTS.ORE_FERIE_ANNUALI,
+                orePermessi: CONSTANTS.ORE_PERMESSI_ANNUALI,
+                oreFerieUtilizzate: 0,
+                orePermessiUtilizzate: 0
+            };
+            await db.collection('users').doc(userId).update(newData);
+            return {
+                oreFerie: CONSTANTS.ORE_FERIE_ANNUALI,
+                orePermessi: CONSTANTS.ORE_PERMESSI_ANNUALI,
+                oreFerieUtilizzate: 0,
+                orePermessiUtilizzate: 0
+            };
+        }
+        
+        return {
+            oreFerie: (data.oreFerie || CONSTANTS.ORE_FERIE_ANNUALI) - (data.oreFerieUtilizzate || 0),
+            orePermessi: (data.orePermessi || CONSTANTS.ORE_PERMESSI_ANNUALI) - (data.orePermessiUtilizzate || 0),
+            oreFerieTotali: data.oreFerie || CONSTANTS.ORE_FERIE_ANNUALI,
+            orePermessiTotali: data.orePermessi || CONSTANTS.ORE_PERMESSI_ANNUALI,
+            oreFerieUtilizzate: data.oreFerieUtilizzate || 0,
+            orePermessiUtilizzate: data.orePermessiUtilizzate || 0
+        };
+    } catch (error) {
+        console.error('Errore getOreResidue:', error);
+        return { oreFerie: 0, orePermessi: 0 };
+    }
+}
+
+// Aggiorna contatore ore dopo modifica stato richiesta
+async function aggiornaContatoreOre(userId, tipoRichiesta, ore, operazione = 'sottrai') {
+    try {
+        const userRef = db.collection('users').doc(userId);
+        const userDoc = await userRef.get();
+        const data = userDoc.data();
+        
+        if (tipoRichiesta === 'Ferie') {
+            let nuoveUtilizzate = (data.oreFerieUtilizzate || 0) + (operazione === 'sottrai' ? ore : -ore);
+            nuoveUtilizzate = Math.max(0, nuoveUtilizzate);
+            await userRef.update({
+                oreFerieUtilizzate: nuoveUtilizzate
+            });
+        } else if (tipoRichiesta === 'Permesso') {
+            let nuoveUtilizzate = (data.orePermessiUtilizzate || 0) + (operazione === 'sottrai' ? ore : -ore);
+            nuoveUtilizzate = Math.max(0, nuoveUtilizzate);
+            await userRef.update({
+                orePermessiUtilizzate: nuoveUtilizzate
+            });
+        }
+        
+        // Aggiorna UI se l'utente è loggato
+        if (appState.currentUser && appState.currentUser.uid === userId) {
+            await aggiornaDisplayOreResidue();
+        }
+        
+    } catch (error) {
+        console.error('Errore aggiornamento contatore:', error);
+    }
+}
+
+// Ricalcola tutte le ore utilizzate da zero (utile per correzioni)
+async function ricalcolaOreUtilizzate(userId, anno = new Date().getFullYear()) {
+    try {
+        // Prendi tutte le richieste approvate dell'anno
+        const startDate = new Date(anno, 0, 1);
+        const endDate = new Date(anno, 11, 31);
+        
+        const snapshot = await db.collection('richieste')
+            .where('userId', '==', userId)
+            .where('stato', '==', 'Approvato')
+            .get();
+        
+        let oreFerieTotali = 0;
+        let orePermessiTotali = 0;
+        
+        for (const doc of snapshot.docs) {
+            const data = doc.data();
+            const dataRichiesta = data.dataInizio?.toDate() || data.data?.toDate();
+            
+            if (dataRichiesta && dataRichiesta.getFullYear() === anno) {
+                if (data.tipo === 'Ferie' && data.dataInizio && data.dataFine) {
+                    const ore = calcolaOreFerie(data.dataInizio.toDate(), data.dataFine.toDate());
+                    oreFerieTotali += ore;
+                } else if (data.tipo === 'Permesso' && data.oraInizio && data.oraFine) {
+                    const ore = calcolaOrePermesso(data.oraInizio, data.oraFine);
+                    orePermessiTotali += ore;
+                }
+            }
+        }
+        
+        await db.collection('users').doc(userId).update({
+            oreFerieUtilizzate: oreFerieTotali,
+            orePermessiUtilizzate: orePermessiTotali,
+            annoCorrente: anno
+        });
+        
+        return { oreFerieTotali, orePermessiTotali };
+    } catch (error) {
+        console.error('Errore ricalcolo:', error);
+        return { oreFerieTotali: 0, orePermessiTotali: 0 };
+    }
+}
+
+// Aggiorna display ore residue per il dipendente loggato
+async function aggiornaDisplayOreResidue() {
+    if (!appState.currentUser || appState.isAdmin) return;
+    
+    const residue = await getOreResidue(appState.currentUser.uid);
+    
+    // Aggiungi indicatori nei form
+    const ferieForm = document.getElementById('ferie');
+    const permessiForm = document.getElementById('permessi');
+    
+    if (ferieForm) {
+        let oreIndicator = document.getElementById('oreFerieIndicator');
+        if (!oreIndicator) {
+            const formHeader = ferieForm.querySelector('h3');
+            if (formHeader) {
+                const indicator = document.createElement('div');
+                indicator.id = 'oreFerieIndicator';
+                indicator.className = 'ore-residue-card';
+                indicator.innerHTML = `
+                    <div class="ore-residue-info">
+                        <span class="ore-label">📊 Ore ferie residue:</span>
+                        <span class="ore-value ${residue.oreFerie < 40 ? 'ore-basse' : ''}">${residue.oreFerie}h</span>
+                    </div>
+                `;
+                formHeader.insertAdjacentElement('afterend', indicator);
+            }
+        } else {
+            oreIndicator.querySelector('.ore-value').textContent = `${residue.oreFerie}h`;
+            if (residue.oreFerie < 40) {
+                oreIndicator.querySelector('.ore-value').classList.add('ore-basse');
+            }
+        }
+    }
+    
+    if (permessiForm) {
+        let oreIndicator = document.getElementById('orePermessiIndicator');
+        if (!oreIndicator) {
+            const formHeader = permessiForm.querySelector('h3');
+            if (formHeader) {
+                const indicator = document.createElement('div');
+                indicator.id = 'orePermessiIndicator';
+                indicator.className = 'ore-residue-card';
+                indicator.innerHTML = `
+                    <div class="ore-residue-info">
+                        <span class="ore-label">⏰ Ore permessi residue:</span>
+                        <span class="ore-value ${residue.orePermessi < 16 ? 'ore-basse' : ''}">${residue.orePermessi}h</span>
+                    </div>
+                `;
+                formHeader.insertAdjacentElement('afterend', indicator);
+            }
+        } else {
+            oreIndicator.querySelector('.ore-value').textContent = `${residue.orePermessi}h`;
+            if (residue.orePermessi < 16) {
+                oreIndicator.querySelector('.ore-value').classList.add('ore-basse');
+            }
+        }
+    }
+}
+
 
 // ==================== REQUESTS MANAGEMENT ====================
 function calcolaGiorniLavorativi(inizio, fine) {
@@ -725,15 +922,44 @@ function attachRequestEventListeners(row, requestId, data) {
 
 async function updateRequestStatus(requestId, newStatus) {
     try {
+        const requestDoc = await db.collection('richieste').doc(requestId).get();
+        const requestData = requestDoc.data();
+        const oldStatus = requestData.stato;
+        
+        // Calcola ore della richiesta
+        let oreRichiesta = 0;
+        if (requestData.tipo === 'Ferie' && requestData.dataInizio && requestData.dataFine) {
+            oreRichiesta = calcolaOreFerie(requestData.dataInizio.toDate(), requestData.dataFine.toDate());
+        } else if (requestData.tipo === 'Permesso' && requestData.oraInizio && requestData.oraFine) {
+            oreRichiesta = calcolaOrePermesso(requestData.oraInizio, requestData.oraFine);
+        }
+        
+        // Gestione aggiornamento contatori
+        if (newStatus === 'Approvato' && oldStatus !== 'Approvato') {
+            // Approvazione: sottrai le ore
+            await aggiornaContatoreOre(requestData.userId, requestData.tipo, oreRichiesta, 'sottrai');
+        } else if (newStatus !== 'Approvato' && oldStatus === 'Approvato') {
+            // Revoca approvazione: restituisci le ore
+            await aggiornaContatoreOre(requestData.userId, requestData.tipo, oreRichiesta, 'aggiungi');
+        }
+        
+        // Aggiorna stato
         await db.collection('richieste').doc(requestId).update({
             stato: newStatus,
             updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
-            updatedBy: appState.currentUser?.uid
+            updatedBy: appState.currentUser?.uid,
+            oreRichiesta: oreRichiesta
         });
         
         showFeedback('Successo', `Stato aggiornato a "${newStatus}"`);
         await loadRequests();
         if (appState.isAdmin && typeof loadCalendarData === 'function') loadCalendarData();
+        
+        // Aggiorna display ore residue se l'utente è il richiedente
+        if (appState.currentUser && appState.currentUser.uid === requestData.userId) {
+            await aggiornaDisplayOreResidue();
+        }
+        
     } catch (error) {
         handleError(error, 'updateRequestStatus');
     }
@@ -741,14 +967,175 @@ async function updateRequestStatus(requestId, newStatus) {
 
 async function deleteRequest(requestId) {
     try {
+        const requestDoc = await db.collection('richieste').doc(requestId).get();
+        const requestData = requestDoc.data();
+        
+        // Se la richiesta era approvata, restituisci le ore
+        if (requestData.stato === 'Approvato') {
+            let oreRichiesta = 0;
+            if (requestData.tipo === 'Ferie' && requestData.dataInizio && requestData.dataFine) {
+                oreRichiesta = calcolaOreFerie(requestData.dataInizio.toDate(), requestData.dataFine.toDate());
+            } else if (requestData.tipo === 'Permesso' && requestData.oraInizio && requestData.oraFine) {
+                oreRichiesta = calcolaOrePermesso(requestData.oraInizio, requestData.oraFine);
+            }
+            await aggiornaContatoreOre(requestData.userId, requestData.tipo, oreRichiesta, 'aggiungi');
+        }
+        
         await db.collection('richieste').doc(requestId).delete();
         showFeedback('Successo', 'Richiesta eliminata con successo');
         await loadRequests();
         if (appState.isAdmin && typeof loadCalendarData === 'function') loadCalendarData();
+        
+        // Aggiorna display ore residue
+        if (appState.currentUser && appState.currentUser.uid === requestData.userId) {
+            await aggiornaDisplayOreResidue();
+        }
+        
     } catch (error) {
         handleError(error, 'deleteRequest');
     }
 }
+// ==================== FUNZIONI ADMIN PER GESTIONE ORE ====================
+
+// Mostra modale per modificare ore di un dipendente
+function showEditOreModal(employeeId, employeeName, currentOreFerie, currentOrePermessi) {
+    const modal = document.createElement('dialog');
+    modal.id = 'editOreModal';
+    modal.className = 'modal';
+    modal.innerHTML = `
+        <div class="modal-content">
+            <h3>✏️ Gestione Ore - ${escapeHtml(employeeName)}</h3>
+            <form id="editOreForm">
+                <div class="form-group">
+                    <label class="form-label">Ore Ferie Annuali</label>
+                    <input type="number" id="editOreFerie" class="form-control" value="${currentOreFerie}" step="1" min="0">
+                    <small class="form-help">Ore totali disponibili per l'anno</small>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Ore Permessi Annuali</label>
+                    <input type="number" id="editOrePermessi" class="form-control" value="${currentOrePermessi}" step="1" min="0">
+                    <small class="form-help">Ore totali disponibili per l'anno</small>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Anno di riferimento</label>
+                    <input type="number" id="editOreAnno" class="form-control" value="${new Date().getFullYear()}" step="1">
+                </div>
+                <div class="modal-actions">
+                    <button type="submit" class="btn btn-primary">💾 Salva</button>
+                    <button type="button" id="closeOreModal" class="btn btn-secondary">Annulla</button>
+                </div>
+            </form>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+    modal.showModal();
+    
+    const form = document.getElementById('editOreForm');
+    const closeBtn = document.getElementById('closeOreModal');
+    
+    form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const oreFerie = parseInt(document.getElementById('editOreFerie').value);
+        const orePermessi = parseInt(document.getElementById('editOrePermessi').value);
+        const anno = parseInt(document.getElementById('editOreAnno').value);
+        
+        await db.collection('users').doc(employeeId).update({
+            oreFerie: oreFerie,
+            orePermessi: orePermessi,
+            annoCorrente: anno,
+            oreFerieUtilizzate: 0,
+            orePermessiUtilizzate: 0,
+            oreUpdatedBy: appState.currentUser.uid,
+            oreUpdatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        
+        // Ricalcola le ore utilizzate dalle richieste esistenti
+        await ricalcolaOreUtilizzate(employeeId, anno);
+        
+        modal.close();
+        modal.remove();
+        showToast(`Ore aggiornate per ${employeeName}`, 'success');
+        await loadEmployeesList();
+    });
+    
+    closeBtn.addEventListener('click', () => {
+        modal.close();
+        modal.remove();
+    });
+}
+
+// Aggiungi colonna ore nella tabella dipendenti
+function renderEmployeesPageWithOre() {
+    const employeesBody = document.getElementById('employeesBody');
+    if (!employeesBody) return;
+    
+    const start = (appState.employeesPage - 1) * appState.employeesPageSize;
+    const pageEmployees = appState.allEmployees.slice(start, start + appState.employeesPageSize);
+    
+    employeesBody.innerHTML = '';
+    
+    if (pageEmployees.length === 0) {
+        employeesBody.innerHTML = `<tr><td colspan="8" class="text-center">Nessun dipendente trovato</td></tr>`;
+        return;
+    }
+    
+    pageEmployees.forEach(employee => {
+        const isCurrentUser = appState.currentUser && appState.currentUser.uid === employee.id;
+        const oreFerieResidue = (employee.oreFerie || CONSTANTS.ORE_FERIE_ANNUALI) - (employee.oreFerieUtilizzate || 0);
+        const orePermessiResidue = (employee.orePermessi || CONSTANTS.ORE_PERMESSI_ANNUALI) - (employee.orePermessiUtilizzate || 0);
+        
+        const row = document.createElement('tr');
+        if (isCurrentUser) row.classList.add('current-user');
+        
+        row.innerHTML = `
+            <td>${escapeHtml(employee.name || 'N/D')}</td>
+            <td>${escapeHtml(employee.email || '')}</td>
+            <td>
+                <select class="role-select form-control" data-id="${employee.id}" ${isCurrentUser ? 'disabled' : ''}>
+                    <option value="dipendente" ${employee.role === 'dipendente' ? 'selected' : ''}>Dipendente</option>
+                    <option value="admin" ${employee.role === 'admin' ? 'selected' : ''}>Admin</option>
+                </select>
+            </td>
+            <td class="ore-cell">
+                <div class="ore-stats">
+                    <span class="ore-ferie">🏖️ ${oreFerieResidue}h</span>
+                    <span class="ore-permessi">⏰ ${orePermessiResidue}h</span>
+                </div>
+            </td>
+            <td>
+                <button class="btn-small btn-edit-ore" data-id="${employee.id}" data-name="${escapeHtml(employee.name)}" 
+                        data-ferie="${employee.oreFerie || CONSTANTS.ORE_FERIE_ANNUALI}" 
+                        data-permessi="${employee.orePermessi || CONSTANTS.ORE_PERMESSI_ANNUALI}">
+                    ✏️ Modifica Ore
+                </button>
+            </td>
+            <td>${employee.temporaryPassword ? '<span class="status-badge rifiutato">⚠️ Temporanea</span>' : '<span class="status-badge approvato">✓ Definitiva</span>'}</td>
+            <td class="actions-cell">
+                ${!isCurrentUser ? `
+                    <button class="btn-small reset-password" data-email="${escapeHtml(employee.email)}">🔄 Reset</button>
+                    <button class="btn-small btn-danger delete-employee" data-id="${employee.id}" data-name="${escapeHtml(employee.name)}">🗑️</button>
+                ` : '<span class="text-muted">Utente corrente</span>'}
+            </td>
+        `;
+        
+        // Eventi per i nuovi bottoni
+        const oreEditBtn = row.querySelector('.btn-edit-ore');
+        if (oreEditBtn) {
+            oreEditBtn.addEventListener('click', () => {
+                showEditOreModal(
+                    oreEditBtn.dataset.id,
+                    oreEditBtn.dataset.name,
+                    parseInt(oreEditBtn.dataset.ferie),
+                    parseInt(oreEditBtn.dataset.permessi)
+                );
+            });
+        }
+        
+        employeesBody.appendChild(row);
+    });
+}
+
 
 // ==================== REQUEST SUBMISSIONS ====================
 async function handleFerieSubmit(e) {
@@ -775,8 +1162,17 @@ async function handleFerieSubmit(e) {
     }
     
     const giorni = calcolaGiorniLavorativi(dataInizio, dataFine);
+    const oreRichiesta = giorni * CONSTANTS.ORE_GIORNO_LAVORATIVO;
+    
     if (giorni <= 0) {
         showFeedback('Errore', 'Nessun giorno lavorativo nel periodo selezionato');
+        return;
+    }
+    
+    // VERIFICA ORE RESIDUE
+    const residue = await getOreResidue(appState.currentUser.uid);
+    if (oreRichiesta > residue.oreFerie) {
+        showFeedback('Errore', `❌ Ore ferie insufficienti!\n\nRichiedi: ${oreRichiesta}h\nResidue: ${residue.oreFerie}h\nMancano: ${oreRichiesta - residue.oreFerie}h`, true);
         return;
     }
     
@@ -788,13 +1184,16 @@ async function handleFerieSubmit(e) {
             dataInizio: firebase.firestore.Timestamp.fromDate(dataInizio),
             dataFine: firebase.firestore.Timestamp.fromDate(dataFine),
             giorni: giorni,
+            oreRichiesta: oreRichiesta,
             stato: 'In attesa',
             createdAt: firebase.firestore.FieldValue.serverTimestamp()
         });
         
         document.getElementById('ferieForm').reset();
-        showFeedback('Successo', `Richiesta ferie inviata! ${giorni} giorni richiesti.`);
+        document.getElementById('ferieGiorni').value = '';
+        showFeedback('Successo', `✅ Richiesta ferie inviata!\n\n📅 Periodo: ${giorni} giorni\n⏰ Ore richieste: ${oreRichiesta}h`, true);
         await loadRequests();
+        
     } catch (error) {
         handleError(error, 'handleFerieSubmit');
     }
@@ -912,6 +1311,15 @@ async function handlePermessiSubmit(e) {
         return;
     }
     
+    const oreRichiesta = calcolaOrePermesso(oraInizio, oraFine);
+    
+    // VERIFICA ORE RESIDUE
+    const residue = await getOreResidue(appState.currentUser.uid);
+    if (oreRichiesta > residue.orePermessi) {
+        showFeedback('Errore', `❌ Ore permessi insufficienti!\n\nRichiedi: ${oreRichiesta}h\nResidue: ${residue.orePermessi}h\nMancano: ${(oreRichiesta - residue.orePermessi).toFixed(1)}h`, true);
+        return;
+    }
+    
     try {
         await db.collection('richieste').add({
             tipo: 'Permesso',
@@ -920,19 +1328,21 @@ async function handlePermessiSubmit(e) {
             data: firebase.firestore.Timestamp.fromDate(data),
             oraInizio: oraInizio,
             oraFine: oraFine,
+            oreRichiesta: oreRichiesta,
             motivazione: sanitizeInput(motivazione) || '',
             stato: 'In attesa',
             createdAt: firebase.firestore.FieldValue.serverTimestamp()
         });
         
         document.getElementById('permessiForm').reset();
-        showFeedback('Successo', 'Richiesta permesso inviata con successo!');
+        showFeedback('Successo', `✅ Richiesta permesso inviata!\n\n📅 Data: ${data.toLocaleDateString('it-IT')}\n⏰ Ore richieste: ${oreRichiesta}h`, true);
         await loadRequests();
         
     } catch (error) {
         handleError(error, 'handlePermessiSubmit');
     }
 }
+
 
 // ==================== EDIT REQUEST ====================
 async function editRequest(requestId) {
@@ -1329,23 +1739,34 @@ async function loadEmployeesList() {
     const employeesBody = document.getElementById('employeesBody');
     if (!employeesBody) return;
     
-    employeesBody.innerHTML = `<tr><td colspan="6">Caricamento...</td></tr>`;
+    employeesBody.innerHTML = `<tr><td colspan="7">Caricamento...</td></tr>`;
     
     try {
         const snapshot = await db.collection('users').orderBy('name').get();
         
         appState.allEmployees = [];
-        snapshot.forEach(doc => {
-            appState.allEmployees.push({ id: doc.id, ...doc.data() });
-        });
+        for (const doc of snapshot.docs) {
+            const data = doc.data();
+            // Assicurati che i campi ore esistano
+            if (data.role !== 'admin' || doc.id === appState.currentUser?.uid) {
+                appState.allEmployees.push({ 
+                    id: doc.id, 
+                    ...data,
+                    oreFerie: data.oreFerie || CONSTANTS.ORE_FERIE_ANNUALI,
+                    orePermessi: data.orePermessi || CONSTANTS.ORE_PERMESSI_ANNUALI,
+                    oreFerieUtilizzate: data.oreFerieUtilizzate || 0,
+                    orePermessiUtilizzate: data.orePermessiUtilizzate || 0
+                });
+            }
+        }
         
         appState.totalEmployees = appState.allEmployees.length;
         updateEmployeesPagination();
-        renderEmployeesPage();
+        renderEmployeesPageWithOre(); // Usa la nuova funzione
         
     } catch (error) {
         handleError(error, 'loadEmployeesList');
-        employeesBody.innerHTML = `<tr><td colspan="6" class="error">Errore nel caricamento</td></tr>`;
+        employeesBody.innerHTML = `<tr><td colspan="7" class="error">Errore nel caricamento</td></tr>`;
     }
 }
 
@@ -1942,13 +2363,16 @@ function setupUI() {
     if (loginContainer) loginContainer.style.display = 'none';
     if (mainContainer) mainContainer.style.display = 'block';
     
+    // Aggiorna display ore residue per dipendente
+    if (!isAdmin) {
+        aggiornaDisplayOreResidue();
+    }
+    
     loadRequests();
     setupRealtimeListener();
     
-    // Aggiungi campo allegato al form malattia
     addAttachmentFieldToMalattiaForm();
     
-    // Mostra calendario per admin
     const calendarSection = document.getElementById('calendarSection');
     if (calendarSection) {
         if (isAdmin) {
@@ -1962,7 +2386,6 @@ function setupUI() {
     
     announceToScreenReader(`Accesso effettuato come ${userData.name}`);
 }
-
 function addAttachmentFieldToMalattiaForm() {
     const malattiaForm = document.getElementById('malattiaForm');
     if (!malattiaForm) return;

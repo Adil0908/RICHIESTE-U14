@@ -1451,3 +1451,127 @@ h3 { font-size: 1.25rem; }
         font-size: 1.25rem;
     }
 }
+
+/* ===== STILI PER ORE CON RESIDUI ===== */
+.ore-residue-card {
+    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+    border-radius: var(--radius-md);
+    padding: var(--spacing-md);
+    margin-bottom: var(--spacing-lg);
+    border-left: 4px solid var(--primary);
+}
+
+.ore-residue-info {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--spacing-sm);
+    margin-bottom: var(--spacing-sm);
+}
+
+.ore-dettaglio {
+    display: flex;
+    gap: var(--spacing-md);
+    flex-wrap: wrap;
+    font-size: 0.75rem;
+    color: var(--gray-600);
+    padding-top: var(--spacing-sm);
+    border-top: 1px solid var(--gray-200);
+}
+
+.ore-dettaglio-small {
+    display: flex;
+    gap: var(--spacing-xs);
+    flex-wrap: wrap;
+    font-size: 0.65rem;
+    color: var(--gray-500);
+    margin-top: 4px;
+}
+
+.ore-negative {
+    color: var(--danger) !important;
+    animation: pulseWarning 1s infinite;
+}
+
+.form-section {
+    margin-bottom: var(--spacing-lg);
+    padding-bottom: var(--spacing-md);
+    border-bottom: 1px solid var(--gray-200);
+}
+
+.form-section h4 {
+    font-size: 1rem;
+    margin-bottom: var(--spacing-md);
+    color: var(--primary);
+}
+
+.anteprima-totali {
+    background: var(--gray-100);
+    padding: var(--spacing-md);
+    border-radius: var(--radius-md);
+    display: flex;
+    gap: var(--spacing-lg);
+    justify-content: center;
+}
+
+.anteprima-totali div {
+    font-weight: 600;
+}
+
+.anteprima-totali span {
+    font-size: 1.25rem;
+    font-weight: 700;
+}
+
+/* Dark mode */
+@media (prefers-color-scheme: dark) {
+    .ore-dettaglio {
+        border-top-color: var(--border-color);
+    }
+    
+     .anteprima-totali {
+        background: var(--bg-tertiary);
+    }
+}
+
+@media (max-width: 768px) {
+    .ore-dettaglio {
+        flex-direction: column;
+        gap: var(--spacing-xs);
+    }
+    
+    .anteprima-totali {
+        flex-direction: column;
+        text-align: center;
+    }
+}
+/* ===== RESET INFO STYLES ===== */
+.reset-info {
+    margin: var(--spacing-lg) 0;
+}
+
+.info-box {
+    background: #fff3cd;
+    border: 1px solid #ffeeba;
+    border-radius: var(--radius-md);
+    padding: var(--spacing-md);
+    margin: var(--spacing-md) 0;
+}
+
+.info-box ul {
+    margin: var(--spacing-sm) 0 0 var(--spacing-lg);
+}
+
+.info-box li {
+    margin: var(--spacing-xs) 0;
+}
+
+/* Dark mode */
+@media (prefers-color-scheme: dark) {
+    .info-box {
+        background: rgba(255, 183, 3, 0.1);
+        border-color: rgba(255, 183, 3, 0.3);
+        color: #ffd966;
+    }
+}

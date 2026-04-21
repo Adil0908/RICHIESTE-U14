@@ -2117,7 +2117,18 @@ function renderEmployeesPage() {
                 ` : '<span class="text-muted">Utente corrente</span>'}
             </td>
         `;
-        
+        const deleteBtn = row.querySelector('.delete-employee');
+if (deleteBtn) {
+    // Rimuovi eventuali listener vecchi clonando il bottone
+    const newDeleteBtn = deleteBtn.cloneNode(true);
+    deleteBtn.parentNode.replaceChild(newDeleteBtn, deleteBtn);
+    
+    newDeleteBtn.addEventListener('click', () => {
+        const userId = newDeleteBtn.getAttribute('data-id');
+        const userName = newDeleteBtn.getAttribute('data-name');
+        deleteEmployee(userId, userName);
+    });
+}
         // Eventi
         const oreEditBtn = row.querySelector('.btn-edit-ore');
         if (oreEditBtn) {
@@ -2139,6 +2150,7 @@ function renderEmployeesPage() {
         
         employeesBody.appendChild(row);
     });
+ 
 }
 function updateTableDataLabelsEmployees() {
     const headers = document.querySelectorAll('#employeesList .requests-table th');
@@ -2186,20 +2198,137 @@ async function resetEmployeePassword(email) {
     });
 }
 
+// ==================== ELIMINA DIPENDENTE (VERSIONE SICURA) ====================
 async function deleteEmployee(userId, name) {
-    showConfirmation('Elimina Dipendente', `Eliminare ${name} e tutte le sue richieste?`, async () => {
-        try {
-            const requests = await db.collection('richieste').where('userId', '==', userId).get();
-            const batch = db.batch();
-            requests.forEach(doc => batch.delete(doc.ref));
-            batch.delete(db.collection('users').doc(userId));
-            await batch.commit();
-            showFeedback('Successo', `Dipendente eliminato`);
-            await loadEmployeesList();
-        } catch (error) {
-            handleError(error, 'deleteEmployee');
+    // Conferma con dettagli
+    showConfirmation(
+        '🗑️ Elimina Dipendente', 
+        `Sei sicuro di voler eliminare ${name}?\n\n⚠️ Verranno eliminati:\n- Tutti i dati del dipendente\n- Tutte le sue richieste (ferie, malattia, permessi)\n\nQuesta operazione è IRREVERSIBILE!`,
+        async () => {
+            const confirmBtn = document.querySelector('#confirmationDialog .btn-danger');
+            if (confirmBtn) {
+                confirmBtn.textContent = '⏳ Eliminazione in corso...';
+                confirmBtn.disabled = true;
+            }
+            
+            // Mostra loading
+            const loadingToast = showLoadingToast('Eliminazione in corso...');
+            
+            try {
+                // 1. Recupera TUTTE le richieste del dipendente
+                const requestsSnapshot = await db.collection('richieste')
+                    .where('userId', '==', userId)
+                    .get();
+                
+                const totalRequests = requestsSnapshot.size;
+                console.log(`📊 Trovate ${totalRequests} richieste per ${name}`);
+                
+                // 2. Elimina le richieste UNA PER UNA (per evitare problemi di permessi batch)
+                let deletedCount = 0;
+                let errorCount = 0;
+                
+                for (const doc of requestsSnapshot.docs) {
+                    try {
+                        await db.collection('richieste').doc(doc.id).delete();
+                        deletedCount++;
+                        
+                        // Aggiorna progresso ogni 10 richieste
+                        if (deletedCount % 10 === 0) {
+                            updateLoadingToast(loadingToast, `Eliminazione richieste: ${deletedCount}/${totalRequests}`);
+                        }
+                    } catch (err) {
+                        console.error(`Errore eliminazione richiesta ${doc.id}:`, err);
+                        errorCount++;
+                    }
+                }
+                
+                updateLoadingToast(loadingToast, `Eliminazione profilo utente...`);
+                
+                // 3. Elimina il documento utente
+                await db.collection('users').doc(userId).delete();
+                
+                // 4. Log dell'operazione (opzionale, se hai permessi)
+                try {
+                    await db.collection('auditLog').add({
+                        action: 'delete_employee',
+                        userId: userId,
+                        userName: name,
+                        deletedBy: appState.currentUser?.uid,
+                        deletedByName: appState.currentUserData?.name,
+                        requestsDeleted: deletedCount,
+                        errorsCount: errorCount,
+                        timestamp: firebase.firestore.FieldValue.serverTimestamp()
+                    });
+                } catch (logError) {
+                    console.warn('Impossibile salvare audit log:', logError);
+                }
+                
+                // Chiudi loading
+                closeLoadingToast(loadingToast);
+                
+                showFeedback('Successo', `✅ Dipendente ${name} eliminato con successo!\n\n📊 Richieste eliminate: ${deletedCount}${errorCount > 0 ? `\n⚠️ Errori: ${errorCount}` : ''}`);
+                showToast(`Dipendente ${name} eliminato`, 'success');
+                
+                // 5. Aggiorna la lista
+                await loadEmployeesList();
+                
+            } catch (error) {
+                console.error('Errore eliminazione:', error);
+                closeLoadingToast(loadingToast);
+                
+                if (error.code === 'permission-denied') {
+                    showFeedback('Errore', `❌ Permessi insufficienti per eliminare il dipendente.\n\nContatta l'amministratore del database per abilitare l'eliminazione.`, true);
+                } else {
+                    handleError(error, 'deleteEmployee');
+                }
+            } finally {
+                if (confirmBtn) {
+                    confirmBtn.textContent = 'Conferma';
+                    confirmBtn.disabled = false;
+                }
+                const dialog = document.getElementById('confirmationDialog');
+                if (dialog) dialog.close();
+            }
         }
-    });
+    );
+}
+
+// ==================== FUNZIONI DI SUPPORTO PER LOADING ====================
+function showLoadingToast(message) {
+    const toastContainer = document.getElementById('toast-container');
+    if (!toastContainer) return null;
+    
+    const toast = document.createElement('div');
+    toast.className = 'toast toast-info';
+    toast.style.position = 'relative';
+    toast.innerHTML = `
+        <div style="display: flex; align-items: center; gap: 10px;">
+            <div class="loading-spinner" style="width: 20px; height: 20px;"></div>
+            <span>${message}</span>
+        </div>
+    `;
+    toastContainer.appendChild(toast);
+    
+    return toast;
+}
+
+function updateLoadingToast(toast, message) {
+    if (toast && toast.querySelector('span')) {
+        toast.querySelector('span').textContent = message;
+    }
+}
+
+function closeLoadingToast(toast) {
+    if (toast) {
+        toast.style.animation = 'slideOutRight 0.3s ease';
+        setTimeout(() => toast.remove(), 300);
+    }
+}
+
+// Funzione helper per log di sistema
+function addSystemLog(message, type = 'info') {
+    console.log(`[${type.toUpperCase()}] ${message}`);
+    // Opzionale: mostra anche nella console
 }
 
 function toggleEmployeesList() {

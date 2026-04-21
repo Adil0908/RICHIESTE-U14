@@ -18,6 +18,7 @@ const EMAILJS_CONFIG = {
     templateId: 'YOUR_TEMPLATE_ID'
 };
 
+
 // ==================== COSTANTI ====================
 const CONSTANTS = {
     TEMP_PASSWORD: 'union14.it',
@@ -27,7 +28,7 @@ const CONSTANTS = {
     TOAST_DURATION: 3000,
     DEBOUNCE_DELAY: 300,
      ORE_FERIE_ANNUALI: 160,      // 20 giorni * 8 ore
-    ORE_PERMESSI_ANNUALI: 32   // 4 giorni * 8 ore
+    ORE_PERMESSI_ANNUALI: 103  // 13 giorni * 8 ore
 };
 
 // ==================== STATO APPLICAZIONE ====================
@@ -46,13 +47,33 @@ const appState = {
     allEmployees: [],
     listeners: new Map()
 };
-
+// Aggiungi evento per lo storico reset
+const resetHistoryBtn = document.getElementById('resetHistoryBtn');
+if (resetHistoryBtn) {
+    resetHistoryBtn.addEventListener('click', showResetHistory);
+}
 // ==================== VARIABILI CALENDARIO ====================
 let currentCalendarDate = new Date();
 let allAbsences = [];
 let notificationsEnabled = false;
 
 // ==================== UTILITY FUNCTIONS ====================
+function setupEmployeesTab() {
+    const showEmployeesBtn = document.getElementById('showEmployeesBtn');
+    if (showEmployeesBtn) {
+        showEmployeesBtn.addEventListener('click', async () => {
+            const employeesList = document.getElementById('employeesList');
+            if (employeesList.style.display === 'block') {
+                employeesList.style.display = 'none';
+            } else {
+                employeesList.style.display = 'block';
+                appState.employeesPage = 1; // Reset alla prima pagina
+                await loadEmployeesList();
+                initEmployeesPaginationEvents();
+            }
+        });
+    }
+}
 function escapeHtml(text) {
     if (!text) return '';
     const div = document.createElement('div');
@@ -439,6 +460,83 @@ async function handlePasswordReset(e) {
         showFeedback('Errore', getAuthErrorMessage(error));
     }
 }
+function getAnnoCorrente() {
+    return new Date().getFullYear();
+}
+
+// Ottieni il nome del campo per un anno specifico
+function getFieldName(baseName, anno = null) {
+    const year = anno || getAnnoCorrente();
+    return `${baseName}_${year}`;
+}
+async function inizializzaOreAnnoCorrente(userId) {
+    const annoCorrente = getAnnoCorrente();
+    const userRef = db.collection('users').doc(userId);
+    const userDoc = await userRef.get();
+    const userData = userDoc.data();
+    
+    const updateData = {};
+    
+    // Verifica se esiste già il campo per l'anno corrente
+    const ferieField = getFieldName('oreFerie', annoCorrente);
+    const permessiField = getFieldName('orePermessi', annoCorrente);
+    
+    if (!userData[ferieField]) {
+        updateData[ferieField] = CONSTANTS.ORE_FERIE_ANNUALI;
+        updateData[getFieldName('oreFerieUtilizzate', annoCorrente)] = 0;
+    }
+    
+    if (!userData[permessiField]) {
+        updateData[permessiField] = CONSTANTS.ORE_PERMESSI_ANNUALI;
+        updateData[getFieldName('orePermessiUtilizzate', annoCorrente)] = 0;
+    }
+    
+    if (Object.keys(updateData).length > 0) {
+        await userRef.update(updateData);
+    }
+}
+async function getOreTotali(userId) {
+    const annoCorrente = getAnnoCorrente();
+    const userDoc = await db.collection('users').doc(userId).get();
+    const userData = userDoc.data();
+    
+    if (!userData) return { ferie: 0, permessi: 0 };
+    
+    // Assicura che i campi anno corrente esistano
+    await inizializzaOreAnnoCorrente(userId);
+    const userDocAggiornato = await db.collection('users').doc(userId).get();
+    const dataAggiornata = userDocAggiornato.data();
+    
+    // Ore anno corrente
+    const oreFerieAnno = dataAggiornata[getFieldName('oreFerie', annoCorrente)] || CONSTANTS.ORE_FERIE_ANNUALI;
+    const orePermessiAnno = dataAggiornata[getFieldName('orePermessi', annoCorrente)] || CONSTANTS.ORE_PERMESSI_ANNUALI;
+    
+    // Ore utilizzate anno corrente
+    const oreFerieUtilizzate = dataAggiornata[getFieldName('oreFerieUtilizzate', annoCorrente)] || 0;
+    const orePermessiUtilizzate = dataAggiornata[getFieldName('orePermessiUtilizzate', annoCorrente)] || 0;
+    
+    // Ore residue da anni precedenti
+    const oreFeriePrecedenti = dataAggiornata.oreFeriePrecedenti || 0;
+    const orePermessiPrecedenti = dataAggiornata.orePermessiPrecedenti || 0;
+    
+    // Calcolo totali
+    const totaleFerie = (oreFerieAnno - oreFerieUtilizzate) + oreFeriePrecedenti;
+    const totalePermessi = (orePermessiAnno - orePermessiUtilizzate) + orePermessiPrecedenti;
+    
+    return {
+        ferie: Math.max(totaleFerie, 0),
+        permessi: Math.max(totalePermessi, 0),
+        ferieAnnoCorrente: oreFerieAnno - oreFerieUtilizzate,
+        permessiAnnoCorrente: orePermessiAnno - orePermessiUtilizzate,
+        feriePrecedenti: oreFeriePrecedenti,
+        permessiPrecedenti: orePermessiPrecedenti,
+        ferieTotaliAnno: oreFerieAnno,
+        permessiTotaliAnno: orePermessiAnno,
+        ferieUtilizzateAnno: oreFerieUtilizzate,
+        permessiUtilizzateAnno: orePermessiUtilizzate
+    };
+}
+
 // ==================== GESTIONE ORE RESIDUE ====================
 
 // Calcola ore per un periodo di ferie
@@ -504,23 +602,53 @@ async function getOreResidue(userId, anno = new Date().getFullYear()) {
 // Aggiorna contatore ore dopo modifica stato richiesta
 async function aggiornaContatoreOre(userId, tipoRichiesta, ore, operazione = 'sottrai') {
     try {
+        const annoCorrente = getAnnoCorrente();
         const userRef = db.collection('users').doc(userId);
         const userDoc = await userRef.get();
-        const data = userDoc.data();
+        const userData = userDoc.data();
+        
+        // Prima consuma le ore residue dell'anno precedente, poi quelle dell'anno corrente
+        const orePrecedenti = tipoRichiesta === 'Ferie' 
+            ? (userData.oreFeriePrecedenti || 0)
+            : (userData.orePermessiPrecedenti || 0);
+        
+        const utilizzateField = getFieldName(`${tipoRichiesta === 'Ferie' ? 'oreFerieUtilizzate' : 'orePermessiUtilizzate'}`, annoCorrente);
+        let nuoveUtilizzateAnno = userData[utilizzateField] || 0;
+        let nuovePrecedenti = orePrecedenti;
+        
+        if (operazione === 'sottrai') {
+            // Sottrai ore: prima dalle precedenti, poi dall'anno corrente
+            if (orePrecedenti >= ore) {
+                nuovePrecedenti = orePrecedenti - ore;
+            } else {
+                nuovePrecedenti = 0;
+                const oreDaAnnoCorrente = ore - orePrecedenti;
+                nuoveUtilizzateAnno += oreDaAnnoCorrente;
+            }
+        } else {
+            // Aggiungi ore (revoca): aggiungi prima all'anno corrente, poi alle precedenti
+            // (logica inversa per mantenere la priorità)
+            const utilizateAnno = userData[utilizzateField] || 0;
+            if (utilizateAnno >= ore) {
+                nuoveUtilizzateAnno = utilizateAnno - ore;
+            } else {
+                nuoveUtilizzateAnno = 0;
+                const oreDaPrecedenti = ore - utilizateAnno;
+                nuovePrecedenti = orePrecedenti + oreDaPrecedenti;
+            }
+        }
+        
+        const updateData = {
+            [utilizzateField]: Math.max(0, nuoveUtilizzateAnno)
+        };
         
         if (tipoRichiesta === 'Ferie') {
-            let nuoveUtilizzate = (data.oreFerieUtilizzate || 0) + (operazione === 'sottrai' ? ore : -ore);
-            nuoveUtilizzate = Math.max(0, nuoveUtilizzate);
-            await userRef.update({
-                oreFerieUtilizzate: nuoveUtilizzate
-            });
-        } else if (tipoRichiesta === 'Permesso') {
-            let nuoveUtilizzate = (data.orePermessiUtilizzate || 0) + (operazione === 'sottrai' ? ore : -ore);
-            nuoveUtilizzate = Math.max(0, nuoveUtilizzate);
-            await userRef.update({
-                orePermessiUtilizzate: nuoveUtilizzate
-            });
+            updateData.oreFeriePrecedenti = Math.max(0, nuovePrecedenti);
+        } else {
+            updateData.orePermessiPrecedenti = Math.max(0, nuovePrecedenti);
         }
+        
+        await userRef.update(updateData);
         
         // Aggiorna UI se l'utente è loggato
         if (appState.currentUser && appState.currentUser.uid === userId) {
@@ -529,9 +657,9 @@ async function aggiornaContatoreOre(userId, tipoRichiesta, ore, operazione = 'so
         
     } catch (error) {
         console.error('Errore aggiornamento contatore:', error);
+        throw error;
     }
 }
-
 // Ricalcola tutte le ore utilizzate da zero (utile per correzioni)
 async function ricalcolaOreUtilizzate(userId, anno = new Date().getFullYear()) {
     try {
@@ -579,12 +707,10 @@ async function ricalcolaOreUtilizzate(userId, anno = new Date().getFullYear()) {
 async function aggiornaDisplayOreResidue() {
     if (!appState.currentUser || appState.isAdmin) return;
     
-    const residue = await getOreResidue(appState.currentUser.uid);
+    const totali = await getOreTotali(appState.currentUser.uid);
     
-    // Aggiungi indicatori nei form
+    // Aggiorna indicatore ferie
     const ferieForm = document.getElementById('ferie');
-    const permessiForm = document.getElementById('permessi');
-    
     if (ferieForm) {
         let oreIndicator = document.getElementById('oreFerieIndicator');
         if (!oreIndicator) {
@@ -595,20 +721,31 @@ async function aggiornaDisplayOreResidue() {
                 indicator.className = 'ore-residue-card';
                 indicator.innerHTML = `
                     <div class="ore-residue-info">
-                        <span class="ore-label">📊 Ore ferie residue:</span>
-                        <span class="ore-value ${residue.oreFerie < 40 ? 'ore-basse' : ''}">${residue.oreFerie}h</span>
+                        <div class="ore-label">🏖️ Ore ferie disponibili:</div>
+                        <div class="ore-value ${totali.ferie < 40 ? 'ore-basse' : ''}">${totali.ferie}h</div>
+                    </div>
+                    <div class="ore-dettaglio">
+                        <small>📅 Anno corrente: ${totali.ferieAnnoCorrente}h</small>
+                        ${totali.feriePrecedenti > 0 ? `<small>📦 Residuo anni precedenti: +${totali.feriePrecedenti}h</small>` : ''}
+                        ${totali.feriePrecedenti < 0 ? `<small class="text-danger">⚠️ Negativo da recuperare: ${totali.feriePrecedenti}h</small>` : ''}
                     </div>
                 `;
                 formHeader.insertAdjacentElement('afterend', indicator);
             }
         } else {
-            oreIndicator.querySelector('.ore-value').textContent = `${residue.oreFerie}h`;
-            if (residue.oreFerie < 40) {
-                oreIndicator.querySelector('.ore-value').classList.add('ore-basse');
+            oreIndicator.querySelector('.ore-value').textContent = `${totali.ferie}h`;
+            const dettaglioDiv = oreIndicator.querySelector('.ore-dettaglio');
+            if (dettaglioDiv) {
+                dettaglioDiv.innerHTML = `
+                    <small>📅 Anno corrente: ${totali.ferieAnnoCorrente}h</small>
+                    ${totali.feriePrecedenti !== 0 ? `<small>📦 Residuo anni precedenti: ${totali.feriePrecedenti >= 0 ? '+' : ''}${totali.feriePrecedenti}h</small>` : ''}
+                `;
             }
         }
     }
     
+    // Aggiorna indicatore permessi
+    const permessiForm = document.getElementById('permessi');
     if (permessiForm) {
         let oreIndicator = document.getElementById('orePermessiIndicator');
         if (!oreIndicator) {
@@ -619,16 +756,25 @@ async function aggiornaDisplayOreResidue() {
                 indicator.className = 'ore-residue-card';
                 indicator.innerHTML = `
                     <div class="ore-residue-info">
-                        <span class="ore-label">⏰ Ore permessi residue:</span>
-                        <span class="ore-value ${residue.orePermessi < 16 ? 'ore-basse' : ''}">${residue.orePermessi}h</span>
+                        <div class="ore-label">⏰ Ore permessi disponibili:</div>
+                        <div class="ore-value ${totali.permessi < 20 ? 'ore-basse' : ''}">${totali.permessi}h</div>
+                    </div>
+                    <div class="ore-dettaglio">
+                        <small>📅 Anno corrente: ${totali.permessiAnnoCorrente}h</small>
+                        ${totali.permessiPrecedenti > 0 ? `<small>📦 Residuo anni precedenti: +${totali.permessiPrecedenti}h</small>` : ''}
+                        ${totali.permessiPrecedenti < 0 ? `<small class="text-danger">⚠️ Negativo da recuperare: ${totali.permessiPrecedenti}h</small>` : ''}
                     </div>
                 `;
                 formHeader.insertAdjacentElement('afterend', indicator);
             }
         } else {
-            oreIndicator.querySelector('.ore-value').textContent = `${residue.orePermessi}h`;
-            if (residue.orePermessi < 16) {
-                oreIndicator.querySelector('.ore-value').classList.add('ore-basse');
+            oreIndicator.querySelector('.ore-value').textContent = `${totali.permessi}h`;
+            const dettaglioDiv = oreIndicator.querySelector('.ore-dettaglio');
+            if (dettaglioDiv) {
+                dettaglioDiv.innerHTML = `
+                    <small>📅 Anno corrente: ${totali.permessiAnnoCorrente}h</small>
+                    ${totali.permessiPrecedenti !== 0 ? `<small>📦 Residuo anni precedenti: ${totali.permessiPrecedenti >= 0 ? '+' : ''}${totali.permessiPrecedenti}h</small>` : ''}
+                `;
             }
         }
     }
@@ -998,28 +1144,53 @@ async function deleteRequest(requestId) {
 // ==================== FUNZIONI ADMIN PER GESTIONE ORE ====================
 
 // Mostra modale per modificare ore di un dipendente
-function showEditOreModal(employeeId, employeeName, currentOreFerie, currentOrePermessi) {
+function showEditOreModal(employeeId, employeeName, currentData) {
+    const annoCorrente = getAnnoCorrente();
     const modal = document.createElement('dialog');
     modal.id = 'editOreModal';
     modal.className = 'modal';
     modal.innerHTML = `
-        <div class="modal-content">
+        <div class="modal-content" style="max-width: 600px;">
             <h3>✏️ Gestione Ore - ${escapeHtml(employeeName)}</h3>
             <form id="editOreForm">
-                <div class="form-group">
-                    <label class="form-label">Ore Ferie Annuali</label>
-                    <input type="number" id="editOreFerie" class="form-control" value="${currentOreFerie}" step="1" min="0">
-                    <small class="form-help">Ore totali disponibili per l'anno</small>
+                <div class="form-section">
+                    <h4>📅 Anno Corrente ${annoCorrente}</h4>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label">Ore Ferie Annuali</label>
+                            <input type="number" id="editOreFerie" class="form-control" value="${currentData.oreFerieAnno}" step="1" min="0">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Ore Permessi Annuali</label>
+                            <input type="number" id="editOrePermessi" class="form-control" value="${currentData.orePermessiAnno}" step="1" min="0">
+                        </div>
+                    </div>
                 </div>
-                <div class="form-group">
-                    <label class="form-label">Ore Permessi Annuali</label>
-                    <input type="number" id="editOrePermessi" class="form-control" value="${currentOrePermessi}" step="1" min="0">
-                    <small class="form-help">Ore totali disponibili per l'anno</small>
+                
+                <div class="form-section">
+                    <h4>📦 Residuo Anni Precedenti</h4>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label">Ferie residue (può essere negativo)</label>
+                            <input type="number" id="editOreFeriePrecedenti" class="form-control" value="${currentData.oreFeriePrecedenti}" step="1">
+                            <small class="form-help">Valore negativo = ore da recuperare</small>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Permessi residui (può essere negativo)</label>
+                            <input type="number" id="editOrePermessiPrecedenti" class="form-control" value="${currentData.orePermessiPrecedenti}" step="1">
+                            <small class="form-help">Valore negativo = ore da recuperare</small>
+                        </div>
+                    </div>
                 </div>
-                <div class="form-group">
-                    <label class="form-label">Anno di riferimento</label>
-                    <input type="number" id="editOreAnno" class="form-control" value="${new Date().getFullYear()}" step="1">
+                
+                <div class="form-section">
+                    <h4>📊 Anteprima Totali</h4>
+                    <div class="anteprima-totali" id="anteprimaTotali">
+                        <div>🏖️ Ferie totali: <span id="anteprimaFerie">0</span>h</div>
+                        <div>⏰ Permessi totali: <span id="anteprimaPermessi">0</span>h</div>
+                    </div>
                 </div>
+                
                 <div class="modal-actions">
                     <button type="submit" class="btn btn-primary">💾 Salva</button>
                     <button type="button" id="closeOreModal" class="btn btn-secondary">Annulla</button>
@@ -1030,41 +1201,105 @@ function showEditOreModal(employeeId, employeeName, currentOreFerie, currentOreP
     
     document.body.appendChild(modal);
     modal.showModal();
+   
+  function updateAnteprima() {
+        const oreFerie = parseInt(document.getElementById('editOreFerie').value) || 0;
+        const orePermessi = parseInt(document.getElementById('editOrePermessi').value) || 0;
+        const feriePrec = parseInt(document.getElementById('editOreFeriePrecedenti').value) || 0;
+        const permessiPrec = parseInt(document.getElementById('editOrePermessiPrecedenti').value) || 0;
+        const utilizzateFerie = currentData.oreFerieUtilizzate || 0;
+        const utilizzatePermessi = currentData.orePermessiUtilizzate || 0;
+        
+        const totaleFerie = (oreFerie - utilizzateFerie) + feriePrec;
+        const totalePermessi = (orePermessi - utilizzatePermessi) + permessiPrec;
+        
+        document.getElementById('anteprimaFerie').textContent = totaleFerie;
+        document.getElementById('anteprimaPermessi').textContent = totalePermessi;
+        
+        // Colore per valori negativi
+        document.getElementById('anteprimaFerie').style.color = totaleFerie < 0 ? '#ef476f' : '#06d6a0';
+        document.getElementById('anteprimaPermessi').style.color = totalePermessi < 0 ? '#ef476f' : '#06d6a0';
+    }
     
     const form = document.getElementById('editOreForm');
     const closeBtn = document.getElementById('closeOreModal');
     
+    // Aggiungi event listener per anteprima
+    document.getElementById('editOreFerie').addEventListener('input', updateAnteprima);
+    document.getElementById('editOrePermessi').addEventListener('input', updateAnteprima);
+    document.getElementById('editOreFeriePrecedenti').addEventListener('input', updateAnteprima);
+    document.getElementById('editOrePermessiPrecedenti').addEventListener('input', updateAnteprima);
+    updateAnteprima();
+    
     form.addEventListener('submit', async (e) => {
         e.preventDefault();
+        
         const oreFerie = parseInt(document.getElementById('editOreFerie').value);
         const orePermessi = parseInt(document.getElementById('editOrePermessi').value);
-        const anno = parseInt(document.getElementById('editOreAnno').value);
+        const feriePrecedenti = parseInt(document.getElementById('editOreFeriePrecedenti').value);
+        const permessiPrecedenti = parseInt(document.getElementById('editOrePermessiPrecedenti').value);
         
-        await db.collection('users').doc(employeeId).update({
-            oreFerie: oreFerie,
-            orePermessi: orePermessi,
-            annoCorrente: anno,
-            oreFerieUtilizzate: 0,
-            orePermessiUtilizzate: 0,
-            oreUpdatedBy: appState.currentUser.uid,
-            oreUpdatedAt: firebase.firestore.FieldValue.serverTimestamp()
-        });
+        const submitBtn = form.querySelector('button[type="submit"]');
+        const originalText = submitBtn.textContent;
+        submitBtn.textContent = '⏳ Salvataggio...';
+        submitBtn.disabled = true;
         
-        // Ricalcola le ore utilizzate dalle richieste esistenti
-        await ricalcolaOreUtilizzate(employeeId, anno);
-        
-        modal.close();
-        modal.remove();
-        showToast(`Ore aggiornate per ${employeeName}`, 'success');
-        await loadEmployeesList();
+        try {
+            const updateData = {
+                [getFieldName('oreFerie', annoCorrente)]: oreFerie,
+                [getFieldName('orePermessi', annoCorrente)]: orePermessi,
+                oreFeriePrecedenti: feriePrecedenti,
+                orePermessiPrecedenti: permessiPrecedenti,
+                oreUpdatedBy: appState.currentUser.uid,
+                oreUpdatedAt: firebase.firestore.FieldValue.serverTimestamp()
+            };
+            
+            await db.collection('users').doc(employeeId).update(updateData);
+            
+            modal.close();
+            modal.remove();
+            showToast(`✅ Ore aggiornate per ${employeeName}`, 'success');
+            await refreshEmployeesList();
+            
+        } catch (error) {
+            console.error('Errore salvataggio ore:', error);
+            showFeedback('Errore', `Errore: ${error.message}`);
+        } finally {
+            submitBtn.textContent = originalText;
+            submitBtn.disabled = false;
+        }
     });
     
     closeBtn.addEventListener('click', () => {
         modal.close();
         modal.remove();
     });
+    
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) {
+            modal.close();
+            modal.remove();
+        }
+    });
 }
 
+function initEmployeesPaginationEvents() {
+    const prevPage = document.getElementById('prevEmployeesPage');
+    const nextPage = document.getElementById('nextEmployeesPage');
+    
+    if (prevPage) {
+        // Rimuovi eventuali listener vecchi
+        const newPrev = prevPage.cloneNode(true);
+        prevPage.parentNode.replaceChild(newPrev, prevPage);
+        newPrev.addEventListener('click', goToPrevEmployeesPage);
+    }
+    
+    if (nextPage) {
+        const newNext = nextPage.cloneNode(true);
+        nextPage.parentNode.replaceChild(newNext, nextPage);
+        newNext.addEventListener('click', goToNextEmployeesPage);
+    }
+}
 // Aggiungi colonna ore nella tabella dipendenti
 function renderEmployeesPageWithOre() {
     const employeesBody = document.getElementById('employeesBody');
@@ -1169,10 +1404,17 @@ async function handleFerieSubmit(e) {
         return;
     }
     
-    // VERIFICA ORE RESIDUE
-    const residue = await getOreResidue(appState.currentUser.uid);
-    if (oreRichiesta > residue.oreFerie) {
-        showFeedback('Errore', `❌ Ore ferie insufficienti!\n\nRichiedi: ${oreRichiesta}h\nResidue: ${residue.oreFerie}h\nMancano: ${oreRichiesta - residue.oreFerie}h`, true);
+    // VERIFICA ORE TOTALI (anno corrente + precedenti)
+    const totali = await getOreTotali(appState.currentUser.uid);
+    if (oreRichiesta > totali.ferie) {
+        showFeedback('Errore', 
+            `❌ Ore ferie insufficienti!\n\n` +
+            `Richiedi: ${oreRichiesta}h\n` +
+            `Disponibili: ${totali.ferie}h\n` +
+            `📅 Anno corrente: ${totali.ferieAnnoCorrente}h\n` +
+            `📦 Residuo precedente: ${totali.feriePrecedenti >= 0 ? '+' : ''}${totali.feriePrecedenti}h\n` +
+            `Mancano: ${oreRichiesta - totali.ferie}h`, 
+            true);
         return;
     }
     
@@ -1191,7 +1433,12 @@ async function handleFerieSubmit(e) {
         
         document.getElementById('ferieForm').reset();
         document.getElementById('ferieGiorni').value = '';
-        showFeedback('Successo', `✅ Richiesta ferie inviata!\n\n📅 Periodo: ${giorni} giorni\n⏰ Ore richieste: ${oreRichiesta}h`, true);
+        showFeedback('Successo', 
+            `✅ Richiesta ferie inviata!\n\n` +
+            `📅 Periodo: ${giorni} giorni\n` +
+            `⏰ Ore richieste: ${oreRichiesta}h\n` +
+            `📊 Ore residue dopo approvazione: ${totali.ferie - oreRichiesta}h`, 
+            true);
         await loadRequests();
         
     } catch (error) {
@@ -1313,10 +1560,17 @@ async function handlePermessiSubmit(e) {
     
     const oreRichiesta = calcolaOrePermesso(oraInizio, oraFine);
     
-    // VERIFICA ORE RESIDUE
-    const residue = await getOreResidue(appState.currentUser.uid);
-    if (oreRichiesta > residue.orePermessi) {
-        showFeedback('Errore', `❌ Ore permessi insufficienti!\n\nRichiedi: ${oreRichiesta}h\nResidue: ${residue.orePermessi}h\nMancano: ${(oreRichiesta - residue.orePermessi).toFixed(1)}h`, true);
+    // VERIFICA ORE TOTALI
+    const totali = await getOreTotali(appState.currentUser.uid);
+    if (oreRichiesta > totali.permessi) {
+        showFeedback('Errore', 
+            `❌ Ore permessi insufficienti!\n\n` +
+            `Richiedi: ${oreRichiesta}h\n` +
+            `Disponibili: ${totali.permessi}h\n` +
+            `📅 Anno corrente: ${totali.permessiAnnoCorrente}h\n` +
+            `📦 Residuo precedente: ${totali.permessiPrecedenti >= 0 ? '+' : ''}${totali.permessiPrecedenti}h\n` +
+            `Mancano: ${(oreRichiesta - totali.permessi).toFixed(1)}h`, 
+            true);
         return;
     }
     
@@ -1335,7 +1589,12 @@ async function handlePermessiSubmit(e) {
         });
         
         document.getElementById('permessiForm').reset();
-        showFeedback('Successo', `✅ Richiesta permesso inviata!\n\n📅 Data: ${data.toLocaleDateString('it-IT')}\n⏰ Ore richieste: ${oreRichiesta}h`, true);
+        showFeedback('Successo', 
+            `✅ Richiesta permesso inviata!\n\n` +
+            `📅 Data: ${data.toLocaleDateString('it-IT')}\n` +
+            `⏰ Ore richieste: ${oreRichiesta}h\n` +
+            `📊 Ore residue dopo approvazione: ${totali.permessi - oreRichiesta}h`, 
+            true);
         await loadRequests();
         
     } catch (error) {
@@ -1739,34 +1998,44 @@ async function loadEmployeesList() {
     const employeesBody = document.getElementById('employeesBody');
     if (!employeesBody) return;
     
-    employeesBody.innerHTML = `<tr><td colspan="7">Caricamento...</td></tr>`;
+    employeesBody.innerHTML = `<tr><td colspan="8">Caricamento...</td></tr>`;
     
     try {
+        // IMPORTANTE: Recupera TUTTI i dati aggiornati, inclusi i nuovi campi ore
         const snapshot = await db.collection('users').orderBy('name').get();
         
         appState.allEmployees = [];
         for (const doc of snapshot.docs) {
             const data = doc.data();
-            // Assicurati che i campi ore esistano
-            if (data.role !== 'admin' || doc.id === appState.currentUser?.uid) {
-                appState.allEmployees.push({ 
-                    id: doc.id, 
-                    ...data,
-                    oreFerie: data.oreFerie || CONSTANTS.ORE_FERIE_ANNUALI,
-                    orePermessi: data.orePermessi || CONSTANTS.ORE_PERMESSI_ANNUALI,
-                    oreFerieUtilizzate: data.oreFerieUtilizzate || 0,
-                    orePermessiUtilizzate: data.orePermessiUtilizzate || 0
-                });
-            }
+            // Salta admin (tranne l'admin corrente che può vedersi)
+            if (data.role === 'admin' && doc.id !== appState.currentUser?.uid) continue;
+            
+            // Assicurati che i campi ore esistano (per backward compatibility)
+            const oreFerie = data.oreFerie || CONSTANTS.ORE_FERIE_ANNUALI;
+            const orePermessi = data.orePermessi || CONSTANTS.ORE_PERMESSI_ANNUALI;
+            const oreFerieUtilizzate = data.oreFerieUtilizzate || 0;
+            const orePermessiUtilizzate = data.orePermessiUtilizzate || 0;
+            
+            appState.allEmployees.push({ 
+                id: doc.id, 
+                ...data,
+                oreFerie: oreFerie,
+                orePermessi: orePermessi,
+                oreFerieUtilizzate: oreFerieUtilizzate,
+                orePermessiUtilizzate: orePermessiUtilizzate,
+                oreFerieResidue: oreFerie - oreFerieUtilizzate,
+                orePermessiResidue: orePermessi - orePermessiUtilizzate
+            });
         }
         
         appState.totalEmployees = appState.allEmployees.length;
         updateEmployeesPagination();
-        renderEmployeesPageWithOre(); // Usa la nuova funzione
+        renderEmployeesPage(); // Chiama la funzione corretta
         
     } catch (error) {
+        console.error('Errore loadEmployeesList:', error);
         handleError(error, 'loadEmployeesList');
-        employeesBody.innerHTML = `<tr><td colspan="7" class="error">Errore nel caricamento</td></tr>`;
+        employeesBody.innerHTML = `<tr><td colspan="8" class="error">Errore nel caricamento: ${error.message}</td></tr>`;
     }
 }
 
@@ -1780,29 +2049,67 @@ function renderEmployeesPage() {
     employeesBody.innerHTML = '';
     
     if (pageEmployees.length === 0) {
-        employeesBody.innerHTML = `<tr><td colspan="6" class="text-center">Nessun dipendente trovato</td></tr>`;
+        employeesBody.innerHTML = `<td><td colspan="8" class="text-center">Nessun dipendente trovato</td></tr>`;
         return;
     }
     
     pageEmployees.forEach(employee => {
-        const createdAt = employee.createdAt?.toDate ? employee.createdAt.toDate() : new Date();
         const isCurrentUser = appState.currentUser && appState.currentUser.uid === employee.id;
+        const annoCorrente = getAnnoCorrente();
+        
+        // Calcola totali
+        const oreFerieAnno = employee[getFieldName('oreFerie', annoCorrente)] || CONSTANTS.ORE_FERIE_ANNUALI;
+        const orePermessiAnno = employee[getFieldName('orePermessi', annoCorrente)] || CONSTANTS.ORE_PERMESSI_ANNUALI;
+        const ferieUtilizzate = employee[getFieldName('oreFerieUtilizzate', annoCorrente)] || 0;
+        const permessiUtilizzate = employee[getFieldName('orePermessiUtilizzate', annoCorrente)] || 0;
+        const feriePrecedenti = employee.oreFeriePrecedenti || 0;
+        const permessiPrecedenti = employee.orePermessiPrecedenti || 0;
+        
+        const totaleFerie = (oreFerieAnno - ferieUtilizzate) + feriePrecedenti;
+        const totalePermessi = (orePermessiAnno - permessiUtilizzate) + permessiPrecedenti;
+        
+        const ferieClass = totaleFerie < 40 ? 'ore-basse' : (totaleFerie < 0 ? 'ore-negative' : '');
+        const permessiClass = totalePermessi < 20 ? 'ore-basse' : (totalePermessi < 0 ? 'ore-negative' : '');
         
         const row = document.createElement('tr');
         if (isCurrentUser) row.classList.add('current-user');
         
         row.innerHTML = `
-            <td>${escapeHtml(employee.name || 'N/D')}</td>
-            <td>${escapeHtml(employee.email || '')}</td>
-            <td>
+            <td data-label="Nome">${escapeHtml(employee.name || 'N/D')}</td>
+            <td data-label="Email">${escapeHtml(employee.email || '')}</td>
+            <td data-label="Ruolo">
                 <select class="role-select form-control" data-id="${employee.id}" ${isCurrentUser ? 'disabled' : ''}>
                     <option value="dipendente" ${employee.role === 'dipendente' ? 'selected' : ''}>Dipendente</option>
                     <option value="admin" ${employee.role === 'admin' ? 'selected' : ''}>Admin</option>
                 </select>
             </td>
-            <td>${createdAt.toLocaleDateString('it-IT')}</td>
-            <td>${employee.temporaryPassword ? '<span class="status-badge rifiutato">⚠️ Temporanea</span>' : '<span class="status-badge approvato">✓ Definitiva</span>'}</td>
-            <td class="actions-cell">
+            <td data-label="Ore Totali" class="ore-cell">
+                <div class="ore-stats">
+                    <span class="ore-ferie ${ferieClass}">🏖️ Ferie: ${totaleFerie}h</span>
+                    <span class="ore-permessi ${permessiClass}">⏰ Permessi: ${totalePermessi}h</span>
+                </div>
+                <div class="ore-dettaglio-small">
+                    <small>📅 Anno: ${oreFerieAnno - ferieUtilizzate}h</small>
+                    ${feriePrecedenti !== 0 ? `<small>📦 Residuo: ${feriePrecedenti >= 0 ? '+' : ''}${feriePrecedenti}h</small>` : ''}
+                </div>
+            </td>
+            <td data-label="Gestione Ore">
+                <button class="btn-small btn-edit-ore" 
+                        data-id="${employee.id}" 
+                        data-name="${escapeHtml(employee.name)}"
+                        data-ferie-anno="${oreFerieAnno}"
+                        data-permessi-anno="${orePermessiAnno}"
+                        data-ferie-utilizzate="${ferieUtilizzate}"
+                        data-permessi-utilizzate="${permessiUtilizzate}"
+                        data-ferie-precedenti="${feriePrecedenti}"
+                        data-permessi-precedenti="${permessiPrecedenti}">
+                    ✏️ Modifica Ore
+                </button>
+            </td>
+            <td data-label="Stato Password">
+                ${employee.temporaryPassword ? '<span class="status-badge rifiutato">⚠️ Temporanea</span>' : '<span class="status-badge approvato">✓ Definitiva</span>'}
+            </td>
+            <td data-label="Azioni" class="actions-cell">
                 ${!isCurrentUser ? `
                     <button class="btn-small reset-password" data-email="${escapeHtml(employee.email)}">🔄 Reset</button>
                     <button class="btn-small btn-danger delete-employee" data-id="${employee.id}" data-name="${escapeHtml(employee.name)}">🗑️</button>
@@ -1810,23 +2117,39 @@ function renderEmployeesPage() {
             </td>
         `;
         
-        if (!isCurrentUser) {
-            const roleSelect = row.querySelector('.role-select');
-            const resetBtn = row.querySelector('.reset-password');
-            const deleteBtn = row.querySelector('.delete-employee');
-            
-            if (roleSelect) {
-                roleSelect.addEventListener('change', () => updateEmployeeRole(employee.id, roleSelect.value));
-            }
-            if (resetBtn) {
-                resetBtn.addEventListener('click', () => resetEmployeePassword(resetBtn.getAttribute('data-email')));
-            }
-            if (deleteBtn) {
-                deleteBtn.addEventListener('click', () => deleteEmployee(employee.id, deleteBtn.getAttribute('data-name')));
-            }
+        // Eventi
+        const oreEditBtn = row.querySelector('.btn-edit-ore');
+        if (oreEditBtn) {
+            oreEditBtn.addEventListener('click', () => {
+                showEditOreModal(
+                    oreEditBtn.dataset.id,
+                    oreEditBtn.dataset.name,
+                    {
+                        oreFerieAnno: parseInt(oreEditBtn.dataset.ferieAnno),
+                        orePermessiAnno: parseInt(oreEditBtn.dataset.permessiAnno),
+                        oreFerieUtilizzate: parseInt(oreEditBtn.dataset.ferieUtilizzate),
+                        orePermessiUtilizzate: parseInt(oreEditBtn.dataset.permessiUtilizzate),
+                        oreFeriePrecedenti: parseInt(oreEditBtn.dataset.feriePrecedenti),
+                        orePermessiPrecedenti: parseInt(oreEditBtn.dataset.permessiPrecedenti)
+                    }
+                );
+            });
         }
         
         employeesBody.appendChild(row);
+    });
+}
+function updateTableDataLabelsEmployees() {
+    const headers = document.querySelectorAll('#employeesList .requests-table th');
+    const headerTexts = Array.from(headers).map(th => th.textContent.trim());
+    
+    document.querySelectorAll('#employeesList .requests-table tbody tr').forEach(row => {
+        const cells = row.querySelectorAll('td');
+        cells.forEach((cell, index) => {
+            if (headerTexts[index]) {
+                cell.setAttribute('data-label', headerTexts[index]);
+            }
+        });
     });
 }
 
@@ -1938,7 +2261,7 @@ function updateEmployeesPagination() {
 function goToPrevEmployeesPage() {
     if (appState.employeesPage > 1) {
         appState.employeesPage--;
-        renderEmployeesPage();
+        renderEmployeesPage(); // Ricarica solo la pagina corrente (usa dati già in memoria)
         updateEmployeesPagination();
     }
 }
@@ -1947,11 +2270,24 @@ function goToNextEmployeesPage() {
     const totalPages = Math.ceil(appState.totalEmployees / appState.employeesPageSize);
     if (appState.employeesPage < totalPages) {
         appState.employeesPage++;
-        renderEmployeesPage();
+        renderEmployeesPage(); // Ricarica solo la pagina corrente
         updateEmployeesPagination();
     }
 }
-
+async function refreshEmployeesList() {
+    const snapshot = await db.collection('users').orderBy('name').get();
+    
+    appState.allEmployees = [];
+    for (const doc of snapshot.docs) {
+        const data = doc.data();
+        if (data.role === 'admin' && doc.id !== appState.currentUser?.uid) continue;
+        appState.allEmployees.push({ id: doc.id, ...data });
+    }
+    
+    appState.totalEmployees = appState.allEmployees.length;
+    updateEmployeesPagination();
+    renderEmployeesPage();
+}
 // ==================== FILTERS ====================
 function applyFilters() {
     // Recupera i valori dei filtri
@@ -2343,6 +2679,9 @@ function setupUI() {
     const adminControls = document.getElementById('adminControls');
     if (adminControls) {
         adminControls.style.display = isAdmin ? 'block' : 'none';
+        if (isAdmin) {
+            addResetButtonToAdminPanel(); // Aggiungi bottone reset
+        }
     }
     
     const requestForms = document.getElementById('requestForms');
@@ -2363,7 +2702,7 @@ function setupUI() {
     if (loginContainer) loginContainer.style.display = 'none';
     if (mainContainer) mainContainer.style.display = 'block';
     
-    // Aggiorna display ore residue per dipendente
+    // Aggiorna display ore residue
     if (!isAdmin) {
         aggiornaDisplayOreResidue();
     }
@@ -2384,8 +2723,14 @@ function setupUI() {
         }
     }
     
+    // Verifica reset automatico (solo per admin all'avvio)
+    if (isAdmin) {
+        verificaResetAutomatico();
+    }
+    
     announceToScreenReader(`Accesso effettuato come ${userData.name}`);
 }
+
 function addAttachmentFieldToMalattiaForm() {
     const malattiaForm = document.getElementById('malattiaForm');
     if (!malattiaForm) return;
@@ -2889,7 +3234,325 @@ function setupFirebaseAuth() {
         }
     });
 }
+// ==================== RESET AUTOMATICO ANNUALE ====================
 
+// Funzione principale per il reset di fine anno
+async function resetAnnoPerDipendente(userId, annoCorrente) {
+    try {
+        const userRef = db.collection('users').doc(userId);
+        const userDoc = await userRef.get();
+        const userData = userDoc.data();
+        
+        const prossimoAnno = annoCorrente + 1;
+        
+        // Calcola il residuo dell'anno corrente (ore non utilizzate)
+        const oreFerieAnno = userData[getFieldName('oreFerie', annoCorrente)] || CONSTANTS.ORE_FERIE_ANNUALI;
+        const orePermessiAnno = userData[getFieldName('orePermessi', annoCorrente)] || CONSTANTS.ORE_PERMESSI_ANNUALI;
+        const ferieUtilizzate = userData[getFieldName('oreFerieUtilizzate', annoCorrente)] || 0;
+        const permessiUtilizzate = userData[getFieldName('orePermessiUtilizzate', annoCorrente)] || 0;
+        
+        // Residuo dell'anno corrente (può essere negativo se hanno usato più del dovuto)
+        let residuoFerie = (oreFerieAnno - ferieUtilizzate);
+        let residuoPermessi = (orePermessiAnno - permessiUtilizzate);
+        
+        // Limite massimo di ore riportabili (es. max 80 ore, opzionale)
+        const MAX_CARRYOVER_FERIE = 80;  // Max 10 giorni
+        const MAX_CARRYOVER_PERMESSI = 40; // Max 5 giorni
+        
+        const carryoverFerie = Math.min(Math.max(residuoFerie, -40), MAX_CARRYOVER_FERIE); // Min -40h, Max +80h
+        const carryoverPermessi = Math.min(Math.max(residuoPermessi, -20), MAX_CARRYOVER_PERMESSI); // Min -20h, Max +40h
+        
+        // Prepara i dati per il nuovo anno
+        const updateData = {
+            // Salva il residuo come "precedenti" per il prossimo anno
+            oreFeriePrecedenti: (userData.oreFeriePrecedenti || 0) + carryoverFerie,
+            orePermessiPrecedenti: (userData.orePermessiPrecedenti || 0) + carryoverPermessi,
+            
+            // Inizializza i campi del nuovo anno
+            [getFieldName('oreFerie', prossimoAnno)]: CONSTANTS.ORE_FERIE_ANNUALI,
+            [getFieldName('orePermessi', prossimoAnno)]: CONSTANTS.ORE_PERMESSI_ANNUALI,
+            [getFieldName('oreFerieUtilizzate', prossimoAnno)]: 0,
+            [getFieldName('orePermessiUtilizzate', prossimoAnno)]: 0,
+            
+            // Marca l'anno corrente come archiviato
+            [`${getFieldName('oreFerie', annoCorrente)}_archived`]: true,
+            [`${getFieldName('orePermessi', annoCorrente)}_archived`]: true,
+            
+            // Data dell'ultimo reset
+            lastResetAt: firebase.firestore.FieldValue.serverTimestamp(),
+            lastResetYear: annoCorrente
+        };
+        
+        // Log del reset
+        const resetLog = {
+            userId: userId,
+            userName: userData.name,
+            anno: annoCorrente,
+            prossimoAnno: prossimoAnno,
+            residuoFerie: residuoFerie,
+            residuoPermessi: residuoPermessi,
+            carryoverFerie: carryoverFerie,
+            carryoverPermessi: carryoverPermessi,
+            timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+            eseguitoDa: appState.currentUser?.uid || 'system'
+        };
+        
+        // Salva il log in una collezione separata
+        await db.collection('resetLog').add(resetLog);
+        
+        // Aggiorna il documento utente
+        await userRef.update(updateData);
+        
+        return {
+            success: true,
+            residuoFerie: residuoFerie,
+            residuoPermessi: residuoPermessi,
+            carryoverFerie: carryoverFerie,
+            carryoverPermessi: carryoverPermessi
+        };
+        
+    } catch (error) {
+        console.error(`Errore reset anno per ${userId}:`, error);
+        return { success: false, error: error.message };
+    }
+}
+
+// Funzione per eseguire il reset su TUTTI i dipendenti
+async function resetAnnoPerTuttiDipendenti(annoCorrente) {
+    console.log(`🚀 Avvio reset annuale per l'anno ${annoCorrente}...`);
+    
+    const risultati = {
+        totale: 0,
+        successi: 0,
+        errori: 0,
+        dettagli: []
+    };
+    
+    try {
+        // Recupera tutti i dipendenti (non admin)
+        const usersSnapshot = await db.collection('users')
+            .where('role', '==', 'dipendente')
+            .get();
+        
+        risultati.totale = usersSnapshot.size;
+        
+        for (const userDoc of usersSnapshot.docs) {
+            const result = await resetAnnoPerDipendente(userDoc.id, annoCorrente);
+            
+            if (result.success) {
+                risultati.successi++;
+                risultati.dettagli.push({
+                    nome: userDoc.data().name,
+                    residuoFerie: result.residuoFerie,
+                    residuoPermessi: result.residuoPermessi,
+                    carryoverFerie: result.carryoverFerie,
+                    carryoverPermessi: result.carryoverPermessi
+                });
+            } else {
+                risultati.errori++;
+                risultati.dettagli.push({
+                    nome: userDoc.data().name,
+                    errore: result.error
+                });
+            }
+        }
+        
+        // Salva il log generale
+        await db.collection('systemLogs').add({
+            tipo: 'reset_annuale',
+            anno: annoCorrente,
+            risultati: risultati,
+            timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+            eseguitoDa: appState.currentUser?.uid || 'system'
+        });
+        
+        return risultati;
+        
+    } catch (error) {
+        console.error('Errore reset generale:', error);
+        throw error;
+    }
+}
+
+// Funzione per verificare e eseguire automaticamente il reset a inizio anno
+async function verificaResetAutomatico() {
+    const oggi = new Date();
+    const annoCorrente = oggi.getFullYear();
+    const mese = oggi.getMonth(); // 0 = Gennaio, 11 = Dicembre
+    
+    // Controlla se siamo a Gennaio (mese 0) e se il reset non è stato ancora fatto
+    if (mese === 0) {
+        // Verifica se il reset per l'anno scorso è già stato fatto
+        const resetLogs = await db.collection('systemLogs')
+            .where('tipo', '==', 'reset_annuale')
+            .where('anno', '==', annoCorrente - 1)
+            .limit(1)
+            .get();
+        
+        if (resetLogs.empty) {
+            console.log(`🔄 Reset automatico per l'anno ${annoCorrente - 1} non eseguito. Avvio...`);
+            await resetAnnoPerTuttiDipendenti(annoCorrente - 1);
+            showToast(`✅ Reset annuale completato per l'anno ${annoCorrente - 1}`, 'success');
+        }
+    }
+}
+
+// ==================== FUNZIONI ADMIN PER RESET MANUALE ====================
+
+// Mostra interfaccia per reset manuale
+function showResetInterface() {
+    const annoCorrente = getAnnoCorrente();
+    const annoScorso = annoCorrente - 1;
+    
+    const modal = document.createElement('dialog');
+    modal.id = 'resetModal';
+    modal.className = 'modal';
+    modal.innerHTML = `
+        <div class="modal-content" style="max-width: 500px;">
+            <h3>🔄 Reset Annuale Ore</h3>
+            <p>Questa operazione trasferirà le ore residue dell'anno <strong>${annoScorso}</strong> nell'anno <strong>${annoCorrente}</strong>.</p>
+            
+            <div class="reset-info">
+                <div class="info-box">
+                    <strong>⚠️ Cosa succederà:</strong>
+                    <ul>
+                        <li>Le ore non utilizzate di ${annoScorso} verranno sommate al residuo precedente</li>
+                        <li>Le ore utilizzate in eccesso (negativo) verranno sottratte</li>
+                        <li>I nuovi anni avranno automaticamente 160h ferie e 103h permessi</li>
+                        <li>Le richieste già approvate rimarranno invariate</li>
+                    </ul>
+                </div>
+            </div>
+            
+            <div class="form-group">
+                <label class="form-label">Limite massimo riporto ferie (ore)</label>
+                <input type="number" id="maxCarryoverFerie" class="form-control" value="80" step="10">
+                <small>0 = nessun riporto, 80 = max 10 giorni</small>
+            </div>
+            
+            <div class="form-group">
+                <label class="form-label">Limite massimo riporto permessi (ore)</label>
+                <input type="number" id="maxCarryoverPermessi" class="form-control" value="40" step="5">
+                <small>0 = nessun riporto, 40 = max 5 giorni</small>
+            </div>
+            
+            <div class="modal-actions">
+                <button id="confirmResetBtn" class="btn btn-warning">🔄 Esegui Reset</button>
+                <button id="cancelResetBtn" class="btn btn-secondary">Annulla</button>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+    modal.showModal();
+    
+    const confirmBtn = document.getElementById('confirmResetBtn');
+    const cancelBtn = document.getElementById('cancelResetBtn');
+    
+    confirmBtn.addEventListener('click', async () => {
+        confirmBtn.disabled = true;
+        confirmBtn.textContent = '⏳ Reset in corso...';
+        
+        try {
+            const maxFerie = parseInt(document.getElementById('maxCarryoverFerie').value) || 80;
+            const maxPermessi = parseInt(document.getElementById('maxCarryoverPermessi').value) || 40;
+            
+            // Aggiorna costanti temporaneamente
+            const originalMaxFerie = window.MAX_CARRYOVER_FERIE;
+            const originalMaxPermessi = window.MAX_CARRYOVER_PERMESSI;
+            window.MAX_CARRYOVER_FERIE = maxFerie;
+            window.MAX_CARRYOVER_PERMESSI = maxPermessi;
+            
+            const risultati = await resetAnnoPerTuttiDipendenti(annoScorso);
+            
+            // Ripristina costanti
+            window.MAX_CARRYOVER_FERIE = originalMaxFerie;
+            window.MAX_CARRYOVER_PERMESSI = originalMaxPermessi;
+            
+            // Mostra risultati
+            let message = `✅ Reset completato!\n\n`;
+            message += `📊 Dipendenti processati: ${risultati.totale}\n`;
+            message += `✅ Successi: ${risultati.successi}\n`;
+            message += `❌ Errori: ${risultati.errori}\n\n`;
+            
+            if (risultati.dettagli.length > 0 && risultati.successi > 0) {
+                message += `📋 Riepilogo (primi 5):\n`;
+                risultati.dettagli.slice(0, 5).forEach(d => {
+                    if (d.carryoverFerie !== undefined) {
+                        message += `- ${d.nome}: Ferie ${d.carryoverFerie >= 0 ? '+' : ''}${d.carryoverFerie}h, Permessi ${d.carryoverPermessi >= 0 ? '+' : ''}${d.carryoverPermessi}h\n`;
+                    }
+                });
+            }
+            
+            showFeedback('Reset Annuale', message, true);
+            
+            modal.close();
+            modal.remove();
+            
+            // Aggiorna la tabella
+            await refreshEmployeesList();
+            
+        } catch (error) {
+            showFeedback('Errore', `Reset fallito: ${error.message}`);
+        } finally {
+            confirmBtn.disabled = false;
+        }
+    });
+    
+    cancelBtn.addEventListener('click', () => {
+        modal.close();
+        modal.remove();
+    });
+}
+
+// ==================== PANNELLO ADMIN CON BOTTONE RESET ====================
+
+// Aggiungi questo bottone nella sezione admin (nell'HTML)
+function addResetButtonToAdminPanel() {
+    const adminActions = document.querySelector('.admin-actions');
+    if (adminActions && !document.getElementById('resetYearBtn')) {
+        const resetBtn = document.createElement('button');
+        resetBtn.id = 'resetYearBtn';
+        resetBtn.className = 'btn btn-warning';
+        resetBtn.innerHTML = '🔄 Reset Annuale Ore';
+        resetBtn.addEventListener('click', showResetInterface);
+        adminActions.appendChild(resetBtn);
+    }
+}
+// ==================== FUNZIONE PER VISUALIZZARE STORICO RESET ====================
+
+async function showResetHistory() {
+    const resetLogs = await db.collection('resetLog')
+        .orderBy('timestamp', 'desc')
+        .limit(20)
+        .get();
+    
+    if (resetLogs.empty) {
+        showFeedback('Storico Reset', 'Nessun reset effettuato');
+        return;
+    }
+    
+    let historyHtml = '<div style="max-height: 400px; overflow-y: auto;">';
+    historyHtml += '<table style="width: 100%; border-collapse: collapse;">';
+    historyHtml += '<tr><th>Data</th><th>Dipendente</th><th>Residuo Ferie</th><th>Riportato</th></tr>';
+    
+    resetLogs.forEach(doc => {
+        const log = doc.data();
+        const data = log.timestamp?.toDate().toLocaleDateString('it-IT') || 'N/D';
+        historyHtml += `
+            <tr style="border-bottom: 1px solid #ddd;">
+                <td style="padding: 8px;">${data}</td>
+                <td style="padding: 8px;">${log.userName}</td>
+                <td style="padding: 8px;">${log.residuoFerie}h</td>
+                <td style="padding: 8px;">${log.carryoverFerie >= 0 ? '+' : ''}${log.carryoverFerie}h</td>
+            </tr>
+        `;
+    });
+    
+    historyHtml += '</table></div>';
+    
+    showFeedback('📋 Storico Reset Annuale', historyHtml, true);
+}
 // ==================== INITIALIZATION ====================
 function initializeApp() {
     console.log('🚀 Avvio applicazione...');

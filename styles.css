@@ -1333,3 +1333,121 @@ h3 { font-size: 1.25rem; }
 ::-webkit-scrollbar-thumb:hover {
     background: var(--primary-dark);
 }
+/* ===== ORE RESIDUE CARDS ===== */
+.ore-residue-card {
+    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+    border-radius: var(--radius-md);
+    padding: var(--spacing-md);
+    margin-bottom: var(--spacing-lg);
+    border-left: 4px solid var(--primary);
+}
+
+.ore-residue-info {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--spacing-sm);
+}
+
+.ore-label {
+    font-weight: 600;
+    color: var(--gray-700);
+    font-size: 0.875rem;
+}
+
+.ore-value {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--success);
+}
+
+.ore-value.ore-basse {
+    color: var(--danger);
+    animation: pulseWarning 1s infinite;
+}
+
+@keyframes pulseWarning {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+}
+
+/* Ore stats nella tabella dipendenti */
+.ore-stats {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.ore-ferie {
+    color: var(--success);
+    font-weight: 600;
+    font-size: 0.8rem;
+}
+
+.ore-permessi {
+    color: var(--warning);
+    font-weight: 600;
+    font-size: 0.8rem;
+}
+
+.btn-edit-ore {
+    background: linear-gradient(135deg, var(--info), var(--info-dark));
+    color: white;
+    border: none;
+    padding: 0.5rem 0.75rem;
+    font-size: 0.7rem;
+}
+
+.btn-edit-ore:hover {
+    transform: translateY(-2px);
+    filter: brightness(1.05);
+}
+
+/* Badge ore nella tabella richieste */
+.ore-badge {
+    display: inline-block;
+    background: var(--gray-100);
+    padding: 2px 8px;
+    border-radius: var(--radius-full);
+    font-size: 0.7rem;
+    font-weight: 600;
+    margin-left: 8px;
+}
+
+.ore-badge.ferie {
+    background: rgba(6, 214, 160, 0.2);
+    color: var(--success-dark);
+}
+
+.ore-badge.permesso {
+    background: rgba(255, 183, 3, 0.2);
+    color: var(--warning-dark);
+}
+
+/* Dark mode */
+@media (prefers-color-scheme: dark) {
+    .ore-residue-card {
+        background: linear-gradient(135deg, var(--bg-tertiary) 0%, var(--bg-secondary) 100%);
+    }
+    
+    .ore-label {
+        color: var(--text-secondary);
+    }
+    
+    .ore-badge {
+        background: var(--bg-tertiary);
+    }
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .ore-residue-info {
+        flex-direction: column;
+        text-align: center;
+    }
+    
+    .ore-value {
+        font-size: 1.25rem;
+    }
+}

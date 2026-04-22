@@ -1222,3 +1222,237 @@ h3 { font-size: 1.25rem; }
 ::-webkit-scrollbar-thumb:hover {
     background: var(--secondary);
 }
+/* Stili per la colonna password */
+.password-cell {
+    min-width: 180px;
+}
+
+.password-display {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-wrap: wrap;
+}
+
+.password-value {
+    font-family: monospace;
+    font-size: 0.8125rem;
+    background: var(--secondary-soft);
+    padding: 4px 8px;
+    border-radius: var(--radius-sm);
+    min-width: 70px;
+    display: inline-block;
+    text-align: center;
+}
+
+.btn-show-password,
+.btn-copy-password,
+.btn-change-password {
+    cursor: pointer;
+    border: none;
+    border-radius: var(--radius-sm);
+    font-size: 0.75rem;
+    transition: var(--transition-fast);
+}
+
+.btn-show-password {
+    background: var(--info);
+    color: white;
+}
+
+.btn-show-password:hover {
+    background: var(--info-dark);
+    transform: scale(1.05);
+}
+
+.btn-copy-password {
+    background: var(--success);
+    color: white;
+}
+
+.btn-copy-password:hover {
+    background: var(--success-dark);
+    transform: scale(1.05);
+}
+
+.btn-change-password {
+    background: var(--warning);
+    color: white;
+}
+
+.btn-change-password:hover {
+    background: var(--warning-dark);
+    transform: scale(1.05);
+}
+
+/* Responsive per tabella password su mobile */
+@media (max-width: 640px) {
+    .password-cell .password-display {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 8px;
+    }
+    
+    .password-cell .btn-show-password,
+    .password-cell .btn-copy-password,
+    .password-cell .btn-change-password {
+        width: auto;
+        padding: 4px 12px;
+    }
+}
+/* ===== STILI PER GESTIONE PASSWORD ===== */
+.password-cell {
+    min-width: 220px;
+}
+
+.password-display {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+.password-value {
+    font-family: 'Courier New', monospace;
+    font-size: 0.75rem;
+    background: var(--secondary-soft);
+    padding: 5px 10px;
+    border-radius: var(--radius-sm);
+    min-width: 80px;
+    display: inline-block;
+    text-align: center;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+}
+
+.btn-show-password,
+.btn-copy-password,
+.btn-change-password,
+.btn-reset-password {
+    cursor: pointer;
+    border: none;
+    border-radius: var(--radius-sm);
+    font-size: 0.7rem;
+    padding: 4px 10px;
+    transition: var(--transition-fast);
+    font-weight: 500;
+}
+
+.btn-show-password {
+    background: var(--info);
+    color: white;
+}
+
+.btn-show-password:hover {
+    background: var(--info-dark);
+    transform: scale(1.02);
+}
+
+.btn-copy-password {
+    background: var(--success);
+    color: white;
+}
+
+.btn-copy-password:hover {
+    background: var(--success-dark);
+    transform: scale(1.02);
+}
+
+.btn-change-password {
+    background: var(--warning);
+    color: white;
+}
+
+.btn-change-password:hover {
+    background: var(--warning-dark);
+    transform: scale(1.02);
+}
+
+.btn-reset-password {
+    background: var(--secondary);
+    color: white;
+}
+
+.btn-reset-password:hover {
+    background: var(--secondary-dark);
+    transform: scale(1.02);
+}
+
+/* Modale cambio password */
+#changePasswordEmployeeDialog .modal-content {
+    max-width: 450px;
+}
+
+.password-generate-btn {
+    background: var(--info-soft);
+    border: 1px solid var(--info);
+    color: var(--info-dark);
+    padding: 6px 12px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    font-size: 0.75rem;
+    margin-top: 8px;
+}
+
+.password-generate-btn:hover {
+    background: var(--info);
+    color: white;
+}
+
+/* Tooltip per copiato */
+.password-copied-tooltip {
+    position: fixed;
+    background: var(--success);
+    color: white;
+    padding: 4px 12px;
+    border-radius: var(--radius-full);
+    font-size: 0.75rem;
+    z-index: 2000;
+    animation: fadeOut 1s ease forwards;
+}
+
+@keyframes fadeOut {
+    0% { opacity: 1; transform: translateY(0); }
+    70% { opacity: 1; }
+    100% { opacity: 0; transform: translateY(-10px); display: none; }
+}
+
+/* Badge password temporanea */
+.password-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: var(--radius-full);
+    font-size: 0.6rem;
+    font-weight: 600;
+    margin-left: 6px;
+}
+
+.password-badge.temp {
+    background: var(--warning-soft);
+    color: var(--warning-dark);
+}
+
+.password-badge.def {
+    background: var(--success-soft);
+    color: var(--success-dark);
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .password-cell {
+        min-width: 200px;
+    }
+    
+    .password-display {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 8px;
+    }
+    
+    .btn-show-password,
+    .btn-copy-password,
+    .btn-change-password {
+        width: auto;
+        padding: 4px 12px;
+    }
+}

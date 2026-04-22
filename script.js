@@ -399,6 +399,11 @@ async function handleLogin(e) {
         appState.isAdmin = userData.role === 'admin';
         
         setupUI();
+        if (!appState.isAdmin) {
+    // Forza il ricaricamento delle richieste e delle ore
+    await loadRequests();
+    await aggiornaDisplayOreResidue();
+}
         
         showError('');
         showToast(`Benvenuto ${escapeHtml(userData.name)}`, 'success');
@@ -1957,6 +1962,17 @@ async function registerEmployee() {
         return;
     }
     
+    let password = prompt("Inserisci password per il dipendente (lascia vuoto per generare automaticamente):");
+    if (!password) {
+        const randomNum = Math.floor(Math.random() * 10000);
+        password = `${name.split(' ')[0].toLowerCase()}${randomNum}`;
+    }
+    
+    if (password.length < 6) {
+        showFeedback('Errore', 'La password deve avere almeno 6 caratteri');
+        return;
+    }
+    
     if (!appState.isAdmin) {
         showFeedback('Errore', 'Solo gli amministratori possono registrare dipendenti');
         return;
@@ -1966,22 +1982,116 @@ async function registerEmployee() {
         const submitBtn = document.getElementById('registerEmployeeBtn');
         setLoadingState(submitBtn, true);
         
-        const userCredential = await auth.createUserWithEmailAndPassword(email, CONSTANTS.TEMP_PASSWORD);
+        // VERIFICA SE ESISTE GIÀ UN DIPENDENTE CON QUESTA EMAIL (in Firestore)
+        const existingUserQuery = await db.collection('users')
+            .where('email', '==', email)
+            .get();
+        
+        const hasExistingData = !existingUserQuery.empty;
+        let oldUserId = null;
+        let oldUserData = null;
+        
+        if (hasExistingData) {
+            const existingDoc = existingUserQuery.docs[0];
+            oldUserId = existingDoc.id;
+            oldUserData = existingDoc.data();
+            
+            const conferma = confirm(
+                `⚠️ TROVATI DATI ESISTENTI per ${email}!\n\n` +
+                `Richiesta: ${oldUserData.name || 'Nome sconosciuto'}\n` +
+                `Vuoi TRASFERIRE le richieste e le ore residue al nuovo account?\n\n` +
+                `(Seleziona ANNULLA per creare un account pulito senza dati precedenti)`
+            );
+            
+            if (!conferma) {
+                console.log('Utente sceglie di NON trasferire i dati');
+                oldUserId = null;
+            }
+        }
+        
+        // Crea nuovo utente in Firebase Auth
+        const userCredential = await auth.createUserWithEmailAndPassword(email, password);
         await userCredential.user.updateProfile({ displayName: name.trim() });
         
-        await db.collection('users').doc(userCredential.user.uid).set({
+        const newUserId = userCredential.user.uid;
+        
+        // Prepara i dati base per il nuovo utente
+        let userData = {
             name: name.trim(),
             email: email,
+            password: password,
             role: 'dipendente',
-            temporaryPassword: true,
+            temporaryPassword: false,
             createdAt: firebase.firestore.FieldValue.serverTimestamp(),
             createdBy: appState.currentUser.uid,
             createdByEmail: appState.currentUser.email,
             createdByName: appState.currentUserData.name
-        });
+        };
         
-        showFeedback('Successo', `✅ Dipendente registrato!<br><br>📧 Email: ${escapeHtml(email)}<br>🔑 Password: ${CONSTANTS.TEMP_PASSWORD}`, true);
+        // SE ESISTEVANO DATI VECCHI, TRASFERISCILI
+        if (oldUserId && oldUserData) {
+            const annoCorrente = getAnnoCorrente();
+            
+            // Trasferisci le richieste
+            const requestsSnapshot = await db.collection('richieste')
+                .where('userId', '==', oldUserId)
+                .get();
+            
+            let requestsTransferred = 0;
+            for (const doc of requestsSnapshot.docs) {
+                await db.collection('richieste').doc(doc.id).update({
+                    userId: newUserId,
+                    userName: name.trim(),
+                    transferredFrom: oldUserId,
+                    transferredAt: firebase.firestore.FieldValue.serverTimestamp()
+                });
+                requestsTransferred++;
+            }
+            
+            // Trasferisci i dati delle ore
+            userData = {
+                ...userData,
+                oreFeriePrecedenti: oldUserData.oreFeriePrecedenti || 0,
+                orePermessiPrecedenti: oldUserData.orePermessiPrecedenti || 0,
+                [getFieldName('oreFerie', annoCorrente)]: oldUserData[getFieldName('oreFerie', annoCorrente)] || CONSTANTS.ORE_FERIE_ANNUALI,
+                [getFieldName('orePermessi', annoCorrente)]: oldUserData[getFieldName('orePermessi', annoCorrente)] || CONSTANTS.ORE_PERMESSI_ANNUALI,
+                [getFieldName('oreFerieUtilizzate', annoCorrente)]: oldUserData[getFieldName('oreFerieUtilizzate', annoCorrente)] || 0,
+                [getFieldName('orePermessiUtilizzate', annoCorrente)]: oldUserData[getFieldName('orePermessiUtilizzate', annoCorrente)] || 0,
+                dataTransferredFrom: oldUserId,
+                dataTransferredAt: firebase.firestore.FieldValue.serverTimestamp()
+            };
+            
+            // Opzionale: archivia il vecchio documento
+            await db.collection('users_archive').doc(oldUserId).set({
+                ...oldUserData,
+                archivedAt: firebase.firestore.FieldValue.serverTimestamp(),
+                transferredTo: newUserId
+            });
+            
+            // Elimina il vecchio documento
+            await db.collection('users').doc(oldUserId).delete();
+            
+            showToast(`✅ Trasferite ${requestsTransferred} richieste e ore residue`, 'success');
+        }
         
+        // Salva il nuovo utente
+        await db.collection('users').doc(newUserId).set(userData);
+        
+        // Mostra feedback
+        let message = `✅ Dipendente registrato!<br><br>`;
+        message += `📧 Email: ${escapeHtml(email)}<br>`;
+        message += `🔑 Password: <strong style="font-size:1.3rem; color:#10b981;">${escapeHtml(password)}</strong><br><br>`;
+        
+        if (oldUserId) {
+            message += `📦 DATI TRASFERITI DAL VECCHIO ACCOUNT!<br>`;
+            message += `✅ Richieste e ore residue recuperate.<br><br>`;
+        }
+        
+        message += `💡 Puoi sempre cambiare la password dalla tabella dipendenti.`;
+        
+        showFeedback('Successo', message, true);
+        
+        // Aggiorna la tabella
         const employeesList = document.getElementById('employeesList');
         if (employeesList?.style.display === 'block') {
             await loadEmployeesList();
@@ -1989,21 +2099,317 @@ async function registerEmployee() {
         
     } catch (error) {
         console.error('Register error:', error);
-        showFeedback('Errore', error.code === 'auth/email-already-in-use' ? 'Email già registrata' : error.message);
+        let errorMsg = error.message;
+        if (error.code === 'auth/email-already-in-use') {
+            errorMsg = '❌ Email già registrata! Usa un\'altra email o contatta l\'admin.';
+        } else if (error.code === 'auth/weak-password') {
+            errorMsg = '❌ Password troppo debole. Usa almeno 6 caratteri.';
+        }
+        showFeedback('Errore', errorMsg);
     } finally {
         const submitBtn = document.getElementById('registerEmployeeBtn');
         setLoadingState(submitBtn, false);
     }
 }
-
+// ==================== TRASFERIMENTO DATI PER NOME ====================
+// ==================== TRASFERIMENTO DATI FORZATO ====================
+async function transferEmployeeDataByName() {
+    if (!appState.isAdmin) {
+        showFeedback('Errore', 'Solo gli amministratori possono trasferire dati');
+        return;
+    }
+    
+    const nomeCompleto = prompt("🔍 Inserisci il NOME COMPLETO del dipendente da trasferire:\n(es. Mario Rossi)\n\nIl sistema cercherà i VECCHI dati e li trasferirà al NUOVO account.");
+    
+    if (!nomeCompleto || !nomeCompleto.trim()) {
+        showFeedback('Errore', 'Il nome è obbligatorio');
+        return;
+    }
+    
+    const nomeCercato = nomeCompleto.trim();
+    
+    const conferma = confirm(
+        `⚠️ TRASFERIMENTO FORZATO DATI\n\n` +
+        `Dipendente: ${nomeCercato}\n\n` +
+        `⚠️ IMPORTANTE:\n` +
+        `- Il dipendente deve essere GIÀ REGISTRATO con il nuovo sistema\n` +
+        `- Il nome deve essere IDENTICO a quello vecchio\n\n` +
+        `Procedere con il trasferimento?`
+    );
+    
+    if (!conferma) return;
+    
+    const loadingToast = showLoadingToast("🔍 Ricerca vecchi dati in corso...");
+    
+    try {
+        // ========== 1. CERCA IL NUOVO ACCOUNT (quello appena registrato) ==========
+        const newUserQuery = await db.collection('users')
+            .where('name', '==', nomeCercato)
+            .get();
+        
+        if (newUserQuery.empty) {
+            closeLoadingToast(loadingToast);
+            showFeedback('Errore', 
+                `❌ Nessun account TROVATO per: ${nomeCercato}\n\n` +
+                `Devi prima REGISTRARE il dipendente con il bottone "Registra Dipendente"\n\n` +
+                `Assicurati che il nome sia ESATTAMENTE: ${nomeCercato}`
+            );
+            return;
+        }
+        
+        const newUserId = newUserQuery.docs[0].id;
+        const newUserData = newUserQuery.docs[0].data();
+        
+        console.log('✅ Nuovo account trovato:', newUserId, newUserData.name);
+        
+        // ========== 2. CERCA I VECCHI DATI ==========
+        updateLoadingToast(loadingToast, "Cerca vecchie richieste...");
+        
+        let oldUserId = null;
+        let oldUserData = null;
+        let requestsToTransfer = [];
+        
+        // METODO 1: Cerca richieste con questo userName (NON userId)
+        const requestsByName = await db.collection('richieste')
+            .where('userName', '==', nomeCercato)
+            .get();
+        
+        if (!requestsByName.empty) {
+            console.log(`📋 Trovate ${requestsByName.size} richieste con nome: ${nomeCercato}`);
+            
+            // Raccogli gli userId unici dalle richieste
+            const uniqueUserIds = new Set();
+            requestsByName.forEach(doc => {
+                const data = doc.data();
+                if (data.userId && data.userId !== newUserId) {
+                    uniqueUserIds.add(data.userId);
+                }
+                requestsToTransfer.push({ id: doc.id, data: data });
+            });
+            
+            if (uniqueUserIds.size > 0) {
+                oldUserId = Array.from(uniqueUserIds)[0];
+                console.log(`📌 Vecchio userId trovato dalle richieste: ${oldUserId}`);
+                
+                // Recupera i dati del vecchio utente
+                const oldUserDoc = await db.collection('users').doc(oldUserId).get();
+                if (oldUserDoc.exists) {
+                    oldUserData = oldUserDoc.data();
+                }
+            }
+        }
+        
+        // METODO 2: Cerca nell'archivio users_archive
+        if (!oldUserId) {
+            updateLoadingToast(loadingToast, "Cerca nell'archivio...");
+            
+            const archiveQuery = await db.collection('users_archive')
+                .where('name', '==', nomeCercato)
+                .get();
+            
+            if (!archiveQuery.empty) {
+                const archiveDoc = archiveQuery.docs[0];
+                oldUserId = archiveDoc.id;
+                oldUserData = archiveDoc.data();
+                console.log('✅ Trovato in archive:', oldUserId);
+            }
+        }
+        
+        // METODO 3: Cerca nella collection users (dipende se ancora presente)
+        if (!oldUserId) {
+            const oldUserQuery = await db.collection('users')
+                .where('name', '==', nomeCercato)
+                .get();
+            
+            if (!oldUserQuery.empty) {
+                const existingDoc = oldUserQuery.docs[0];
+                if (existingDoc.id !== newUserId) {
+                    oldUserId = existingDoc.id;
+                    oldUserData = existingDoc.data();
+                    console.log('✅ Trovato in users (diverso dal nuovo):', oldUserId);
+                }
+            }
+        }
+        
+        if (!oldUserId && requestsToTransfer.length === 0) {
+            closeLoadingToast(loadingToast);
+            showFeedback('Errore', 
+                `❌ Nessun dato VECCHIO trovato per: ${nomeCercato}\n\n` +
+                `Assicurati che:\n` +
+                `- Il dipendente avesse richieste o ore residue\n` +
+                `- Il nome sia IDENTICO a quello usato prima (es. "Mario Rossi" non "mario rossi")\n` +
+                `- Le richieste esistono ancora nel database`
+            );
+            return;
+        }
+        
+        // ========== 3. TRASFERISCI LE RICHIESTE ==========
+        let requestsTransferred = 0;
+        
+        if (requestsToTransfer.length > 0) {
+            updateLoadingToast(loadingToast, `Trasferimento ${requestsToTransfer.length} richieste...`);
+            
+            for (const req of requestsToTransfer) {
+                try {
+                    await db.collection('richieste').doc(req.id).update({
+                        userId: newUserId,
+                        userName: newUserData.name,
+                        transferredFrom: oldUserId || 'unknown',
+                        transferredFromName: nomeCercato,
+                        transferredAt: firebase.firestore.FieldValue.serverTimestamp(),
+                        transferredBy: appState.currentUser?.uid
+                    });
+                    requestsTransferred++;
+                } catch (err) {
+                    console.error('Errore trasferimento richiesta:', err);
+                }
+            }
+        } else if (oldUserId) {
+            // Alternativa: trasferisci per userId
+            const requestsByUserId = await db.collection('richieste')
+                .where('userId', '==', oldUserId)
+                .get();
+            
+            updateLoadingToast(loadingToast, `Trasferimento ${requestsByUserId.size} richieste...`);
+            
+            for (const doc of requestsByUserId.docs) {
+                try {
+                    await db.collection('richieste').doc(doc.id).update({
+                        userId: newUserId,
+                        userName: newUserData.name,
+                        transferredFrom: oldUserId,
+                        transferredAt: firebase.firestore.FieldValue.serverTimestamp()
+                    });
+                    requestsTransferred++;
+                } catch (err) {
+                    console.error('Errore trasferimento richiesta:', err);
+                }
+            }
+        }
+        
+        // ========== 4. TRASFERISCI LE ORE RESIDUE ==========
+        updateLoadingToast(loadingToast, "Trasferimento ore residue...");
+        
+        const annoCorrente = getAnnoCorrente();
+        
+        // Crea dati ore predefiniti se non esistono
+        let oreFerieAnno = CONSTANTS.ORE_FERIE_ANNUALI;
+        let orePermessiAnno = CONSTANTS.ORE_PERMESSI_ANNUALI;
+        let ferieUtilizzate = 0;
+        let permessiUtilizzate = 0;
+        let feriePrecedenti = 0;
+        let permessiPrecedenti = 0;
+        
+        if (oldUserData) {
+            oreFerieAnno = oldUserData[getFieldName('oreFerie', annoCorrente)] || CONSTANTS.ORE_FERIE_ANNUALI;
+            orePermessiAnno = oldUserData[getFieldName('orePermessi', annoCorrente)] || CONSTANTS.ORE_PERMESSI_ANNUALI;
+            ferieUtilizzate = oldUserData[getFieldName('oreFerieUtilizzate', annoCorrente)] || 0;
+            permessiUtilizzate = oldUserData[getFieldName('orePermessiUtilizzate', annoCorrente)] || 0;
+            feriePrecedenti = oldUserData.oreFeriePrecedenti || 0;
+            permessiPrecedenti = oldUserData.orePermessiPrecedenti || 0;
+        }
+        
+        // Se abbiamo trasferito richieste, ricalcola le ore utilizzate
+        if (requestsTransferred > 0) {
+            // Ricalcola le ore utilizzate dal nuovo account
+            const newRequestsSnapshot = await db.collection('richieste')
+                .where('userId', '==', newUserId)
+                .where('stato', '==', 'Approvato')
+                .get();
+            
+            let nuoveFerieUtilizzate = 0;
+            let nuoviPermessiUtilizzate = 0;
+            
+            for (const doc of newRequestsSnapshot.docs) {
+                const data = doc.data();
+                if (data.tipo === 'Ferie' && data.dataInizio && data.dataFine) {
+                    const ore = calcolaOreFerie(data.dataInizio.toDate(), data.dataFine.toDate());
+                    nuoveFerieUtilizzate += ore;
+                } else if (data.tipo === 'Permesso' && data.oraInizio && data.oraFine) {
+                    const ore = calcolaOrePermesso(data.oraInizio, data.oraFine);
+                    nuoviPermessiUtilizzate += ore;
+                }
+            }
+            
+            ferieUtilizzate = nuoveFerieUtilizzate;
+            permessiUtilizzate = nuoviPermessiUtilizzate;
+        }
+        
+        // Aggiorna il nuovo utente con i dati delle ore
+        await db.collection('users').doc(newUserId).update({
+            oreFeriePrecedenti: feriePrecedenti,
+            orePermessiPrecedenti: permessiPrecedenti,
+            [getFieldName('oreFerie', annoCorrente)]: oreFerieAnno,
+            [getFieldName('orePermessi', annoCorrente)]: orePermessiAnno,
+            [getFieldName('oreFerieUtilizzate', annoCorrente)]: ferieUtilizzate,
+            [getFieldName('orePermessiUtilizzate', annoCorrente)]: permessiUtilizzate,
+            dataTransferredFrom: oldUserId || 'unknown',
+            dataTransferredFromName: nomeCercato,
+            dataTransferredAt: firebase.firestore.FieldValue.serverTimestamp(),
+            dataTransferredBy: appState.currentUser?.uid,
+            transferCompleted: true
+        });
+        
+        // ========== 5. ARCHIVIA IL VECCHIO UTENTE ==========
+        if (oldUserId && oldUserId !== newUserId) {
+            try {
+                await db.collection('users_archive').doc(oldUserId).set({
+                    ...(oldUserData || { name: nomeCercato }),
+                    archivedAt: firebase.firestore.FieldValue.serverTimestamp(),
+                    transferredTo: newUserId,
+                    transferredToName: newUserData.name,
+                    transferredBy: appState.currentUser?.uid
+                });
+                
+                // Elimina il vecchio documento
+                try {
+                    await db.collection('users').doc(oldUserId).delete();
+                } catch (err) {
+                    console.log('Vecchio utente già eliminato');
+                }
+            } catch (err) {
+                console.warn('Nota: impossibile archiviare:', err);
+            }
+        }
+        
+        closeLoadingToast(loadingToast);
+        
+        // ========== 6. MOSTRA RIEPILOGO ==========
+        const totaleFerieResidue = (oreFerieAnno - ferieUtilizzate) + feriePrecedenti;
+        const totalePermessiResidue = (orePermessiAnno - permessiUtilizzate) + permessiPrecedenti;
+        
+        let message = `✅ TRASFERIMENTO COMPLETATO!\n\n`;
+        message += `👤 Dipendente: ${nomeCercato}\n`;
+        message += `📧 Email: ${newUserData.email}\n\n`;
+        message += `📊 RICHIESTE TRASFERITE: ${requestsTransferred}\n\n`;
+        message += `⏰ ORE RESIDUE:\n`;
+        message += `🏖️ Ferie: ${totaleFerieResidue}h\n`;
+        message += `⏰ Permessi: ${totalePermessiResidue}h\n\n`;
+        message += `✅ Il dipendente ora deve:\n`;
+        message += `1️⃣ Fare LOGOUT\n`;
+        message += `2️⃣ Fare LOGIN con la nuova password\n`;
+        message += `3️⃣ Vedrà TUTTE le vecchie richieste e ore residue!`;
+        
+        showFeedback('✅ Trasferimento Completato', message, true);
+        
+        // Aggiorna la tabella
+        if (document.getElementById('employeesList')?.style.display === 'block') {
+            await loadEmployeesList();
+        }
+        
+    } catch (error) {
+        console.error('Errore trasferimento:', error);
+        closeLoadingToast(loadingToast);
+        showFeedback('Errore', `Trasferimento fallito: ${error.message}\n\nControlla la console per dettagli.`);
+    }
+}
 async function loadEmployeesList() {
     const employeesBody = document.getElementById('employeesBody');
     if (!employeesBody) return;
     
-    employeesBody.innerHTML = `<tr><td colspan="8">Caricamento...</td></tr>`;
+    employeesBody.innerHTML = `<tr><td colspan="10">Caricamento...</td></tr>`;
     
     try {
-        // IMPORTANTE: Recupera TUTTI i dati aggiornati, inclusi i nuovi campi ore
         const snapshot = await db.collection('users').orderBy('name').get();
         
         appState.allEmployees = [];
@@ -2012,32 +2418,21 @@ async function loadEmployeesList() {
             // Salta admin (tranne l'admin corrente che può vedersi)
             if (data.role === 'admin' && doc.id !== appState.currentUser?.uid) continue;
             
-            // Assicurati che i campi ore esistano (per backward compatibility)
-            const oreFerie = data.oreFerie || CONSTANTS.ORE_FERIE_ANNUALI;
-            const orePermessi = data.orePermessi || CONSTANTS.ORE_PERMESSI_ANNUALI;
-            const oreFerieUtilizzate = data.oreFerieUtilizzate || 0;
-            const orePermessiUtilizzate = data.orePermessiUtilizzate || 0;
-            
             appState.allEmployees.push({ 
                 id: doc.id, 
                 ...data,
-                oreFerie: oreFerie,
-                orePermessi: orePermessi,
-                oreFerieUtilizzate: oreFerieUtilizzate,
-                orePermessiUtilizzate: orePermessiUtilizzate,
-                oreFerieResidue: oreFerie - oreFerieUtilizzate,
-                orePermessiResidue: orePermessi - orePermessiUtilizzate
+                password: data.password || 'N/D'
             });
         }
         
         appState.totalEmployees = appState.allEmployees.length;
         updateEmployeesPagination();
-        renderEmployeesPage(); // Chiama la funzione corretta
+        renderEmployeesPage();
         
     } catch (error) {
         console.error('Errore loadEmployeesList:', error);
         handleError(error, 'loadEmployeesList');
-        employeesBody.innerHTML = `<tr><td colspan="8" class="error">Errore nel caricamento: ${error.message}</td></tr>`;
+        employeesBody.innerHTML = `<tr><td colspan="10" class="error">Errore nel caricamento: ${error.message}</td></tr>`;
     }
 }
 
@@ -2051,7 +2446,7 @@ function renderEmployeesPage() {
     employeesBody.innerHTML = '';
     
     if (pageEmployees.length === 0) {
-        employeesBody.innerHTML = `<td><td colspan="8" class="text-center">Nessun dipendente trovato</td></tr>`;
+        employeesBody.innerHTML = `<tr><td colspan="10" class="text-center">Nessun dipendente trovato</td></tr>`;
         return;
     }
     
@@ -2059,7 +2454,7 @@ function renderEmployeesPage() {
         const isCurrentUser = appState.currentUser && appState.currentUser.uid === employee.id;
         const annoCorrente = getAnnoCorrente();
         
-        // Calcola totali
+        // Calcola totali ore
         const oreFerieAnno = employee[getFieldName('oreFerie', annoCorrente)] || CONSTANTS.ORE_FERIE_ANNUALI;
         const orePermessiAnno = employee[getFieldName('orePermessi', annoCorrente)] || CONSTANTS.ORE_PERMESSI_ANNUALI;
         const ferieUtilizzate = employee[getFieldName('oreFerieUtilizzate', annoCorrente)] || 0;
@@ -2070,15 +2465,31 @@ function renderEmployeesPage() {
         const totaleFerie = (oreFerieAnno - ferieUtilizzate) + feriePrecedenti;
         const totalePermessi = (orePermessiAnno - permessiUtilizzate) + permessiPrecedenti;
         
-        const ferieClass = totaleFerie < 40 ? 'ore-basse' : (totaleFerie < 0 ? 'ore-negative' : '');
-        const permessiClass = totalePermessi < 20 ? 'ore-basse' : (totalePermessi < 0 ? 'ore-negative' : '');
-        
         const row = document.createElement('tr');
         if (isCurrentUser) row.classList.add('current-user');
         
+        const hasPassword = employee.password && employee.password !== 'N/D';
+        const isTempPassword = employee.temporaryPassword === true;
+        
         row.innerHTML = `
-            <td data-label="Nome">${escapeHtml(employee.name || 'N/D')}</td>
+            <td data-label="Nome">${escapeHtml(employee.name || 'N/D')}${isCurrentUser ? ' 👑' : ''}</td>
             <td data-label="Email">${escapeHtml(employee.email || '')}</td>
+            <td data-label="Password" class="password-cell">
+                <div class="password-display">
+                    <span class="password-value" data-full-password="${escapeHtml(employee.password || '')}">
+                        ${hasPassword ? '••••••' : 'N/D'}
+                    </span>
+                    ${hasPassword ? `
+                        <button class="btn-show-password" data-password="${escapeHtml(employee.password)}" title="Mostra password">👁️</button>
+                        <button class="btn-copy-password" data-password="${escapeHtml(employee.password)}" title="Copia password">📋</button>
+                        <button class="btn-change-password" data-id="${employee.id}" data-name="${escapeHtml(employee.name)}" title="Cambia password">🔑</button>
+                        ${!isCurrentUser ? `<button class="btn-reset-password" data-id="${employee.id}" data-name="${escapeHtml(employee.name)}" data-email="${escapeHtml(employee.email)}" title="Reset password">🔄</button>` : ''}
+                    ` : `
+                        <button class="btn-reset-password" data-id="${employee.id}" data-name="${escapeHtml(employee.name)}" data-email="${escapeHtml(employee.email)}" title="Imposta password">➕ Imposta</button>
+                    `}
+                </div>
+                ${hasPassword ? `<span class="password-badge ${isTempPassword ? 'temp' : 'def'}">${isTempPassword ? '⚠️ Temporanea' : '✓ Definitiva'}</span>` : ''}
+            </td>
             <td data-label="Ruolo">
                 <select class="role-select form-control" data-id="${employee.id}" ${isCurrentUser ? 'disabled' : ''}>
                     <option value="dipendente" ${employee.role === 'dipendente' ? 'selected' : ''}>Dipendente</option>
@@ -2087,12 +2498,8 @@ function renderEmployeesPage() {
             </td>
             <td data-label="Ore Totali" class="ore-cell">
                 <div class="ore-stats">
-                    <span class="ore-ferie ${ferieClass}">🏖️ Ferie: ${totaleFerie}h</span>
-                    <span class="ore-permessi ${permessiClass}">⏰ Permessi: ${totalePermessi}h</span>
-                </div>
-                <div class="ore-dettaglio-small">
-                    <small>📅 Anno: ${oreFerieAnno - ferieUtilizzate}h</small>
-                    ${feriePrecedenti !== 0 ? `<small>📦 Residuo: ${feriePrecedenti >= 0 ? '+' : ''}${feriePrecedenti}h</small>` : ''}
+                    <span class="ore-ferie">🏖️ Ferie: ${totaleFerie}h</span>
+                    <span class="ore-permessi">⏰ Permessi: ${totalePermessi}h</span>
                 </div>
             </td>
             <td data-label="Gestione Ore">
@@ -2108,51 +2515,387 @@ function renderEmployeesPage() {
                     ✏️ Modifica Ore
                 </button>
             </td>
-            <td data-label="Stato Password">
-                ${employee.temporaryPassword ? '<span class="status-badge rifiutato">⚠️ Temporanea</span>' : '<span class="status-badge approvato">✓ Definitiva</span>'}
-            </td>
             <td data-label="Azioni" class="actions-cell">
                 ${!isCurrentUser ? `
-                    <button class="btn-small reset-password" data-email="${escapeHtml(employee.email)}">🔄 Reset</button>
-                    <button class="btn-small btn-danger delete-employee" data-id="${employee.id}" data-name="${escapeHtml(employee.name)}">🗑️</button>
+                    <button class="btn-small btn-danger delete-employee" data-id="${employee.id}" data-name="${escapeHtml(employee.name)}">🗑️ Elimina</button>
                 ` : '<span class="text-muted">Utente corrente</span>'}
             </td>
         `;
-        const deleteBtn = row.querySelector('.delete-employee');
-if (deleteBtn) {
-    // Rimuovi eventuali listener vecchi clonando il bottone
-    const newDeleteBtn = deleteBtn.cloneNode(true);
-    deleteBtn.parentNode.replaceChild(newDeleteBtn, deleteBtn);
-    
-    newDeleteBtn.addEventListener('click', () => {
-        const userId = newDeleteBtn.getAttribute('data-id');
-        const userName = newDeleteBtn.getAttribute('data-name');
-        deleteEmployee(userId, userName);
-    });
-}
-        // Eventi
+        
+        // Eventi per i bottoni password
+        attachPasswordEvents(row, employee);
+        
+        // Evento cambio ruolo
+        const roleSelect = row.querySelector('.role-select');
+        if (roleSelect && !isCurrentUser) {
+            roleSelect.addEventListener('change', (e) => {
+                updateEmployeeRole(employee.id, e.target.value);
+            });
+        }
+        
+        // Evento modifica ore
         const oreEditBtn = row.querySelector('.btn-edit-ore');
         if (oreEditBtn) {
             oreEditBtn.addEventListener('click', () => {
-                showEditOreModal(
-                    oreEditBtn.dataset.id,
-                    oreEditBtn.dataset.name,
-                    {
-                        oreFerieAnno: parseInt(oreEditBtn.dataset.ferieAnno),
-                        orePermessiAnno: parseInt(oreEditBtn.dataset.permessiAnno),
-                        oreFerieUtilizzate: parseInt(oreEditBtn.dataset.ferieUtilizzate),
-                        orePermessiUtilizzate: parseInt(oreEditBtn.dataset.permessiUtilizzate),
-                        oreFeriePrecedenti: parseInt(oreEditBtn.dataset.feriePrecedenti),
-                        orePermessiPrecedenti: parseInt(oreEditBtn.dataset.permessiPrecedenti)
-                    }
-                );
+                showEditOreModal(oreEditBtn.dataset.id, oreEditBtn.dataset.name, {
+                    oreFerieAnno: parseInt(oreEditBtn.dataset.ferieAnno),
+                    orePermessiAnno: parseInt(oreEditBtn.dataset.permessiAnno),
+                    oreFerieUtilizzate: parseInt(oreEditBtn.dataset.ferieUtilizzate),
+                    orePermessiUtilizzate: parseInt(oreEditBtn.dataset.permessiUtilizzate),
+                    oreFeriePrecedenti: parseInt(oreEditBtn.dataset.feriePrecedenti),
+                    orePermessiPrecedenti: parseInt(oreEditBtn.dataset.permessiPrecedenti)
+                });
+            });
+        }
+        
+        // Evento elimina dipendente
+        const deleteBtn = row.querySelector('.delete-employee');
+        if (deleteBtn) {
+            deleteBtn.addEventListener('click', () => {
+                deleteEmployee(deleteBtn.dataset.id, deleteBtn.dataset.name);
             });
         }
         
         employeesBody.appendChild(row);
     });
- 
 }
+function attachPasswordEvents(row, employee) {
+    // Mostra/Nascondi password
+    const showBtn = row.querySelector('.btn-show-password');
+    if (showBtn) {
+        showBtn.addEventListener('click', () => {
+            const passwordSpan = showBtn.closest('.password-display').querySelector('.password-value');
+            const fullPassword = showBtn.getAttribute('data-password');
+            const isShowing = passwordSpan.textContent !== '••••••';
+            
+            if (!isShowing) {
+                passwordSpan.textContent = fullPassword;
+                showBtn.textContent = '🙈';
+                showBtn.title = 'Nascondi password';
+                
+                // Dopo 5 secondi nasconde di nuovo
+                setTimeout(() => {
+                    if (passwordSpan.textContent !== '••••••') {
+                        passwordSpan.textContent = '••••••';
+                        showBtn.textContent = '👁️';
+                        showBtn.title = 'Mostra password';
+                    }
+                }, 5000);
+            } else {
+                passwordSpan.textContent = '••••••';
+                showBtn.textContent = '👁️';
+                showBtn.title = 'Mostra password';
+            }
+        });
+    }
+    
+    // Copia password
+    const copyBtn = row.querySelector('.btn-copy-password');
+    if (copyBtn) {
+        copyBtn.addEventListener('click', async () => {
+            const password = copyBtn.getAttribute('data-password');
+            await navigator.clipboard.writeText(password);
+            
+            // Mostra tooltip
+            const tooltip = document.createElement('div');
+            tooltip.className = 'password-copied-tooltip';
+            tooltip.textContent = '✅ Copiata!';
+            tooltip.style.position = 'fixed';
+            tooltip.style.top = (copyBtn.getBoundingClientRect().top - 30) + 'px';
+            tooltip.style.left = copyBtn.getBoundingClientRect().left + 'px';
+            document.body.appendChild(tooltip);
+            setTimeout(() => tooltip.remove(), 1000);
+            
+            showToast('✅ Password copiata negli appunti', 'success');
+        });
+    }
+    
+    // Cambia password
+    const changeBtn = row.querySelector('.btn-change-password');
+    if (changeBtn) {
+        changeBtn.addEventListener('click', () => {
+            showChangePasswordForEmployee(changeBtn.dataset.id, changeBtn.dataset.name);
+        });
+    }
+    
+    // Reset password (per dipendenti senza password o da resettare)
+    const resetBtn = row.querySelector('.btn-reset-password');
+    if (resetBtn) {
+        resetBtn.addEventListener('click', () => {
+            showResetPasswordForEmployee(resetBtn.dataset.id, resetBtn.dataset.name, resetBtn.dataset.email);
+        });
+    }
+}
+// ==================== MIGRAZIONE DIPENDENTI ESISTENTI ====================
+async function migrateExistingEmployees() {
+    const conferma = confirm(
+        "⚠️ MIGRAZIONE DIPENDENTI ESISTENTI\n\n" +
+        "Questa operazione:\n" +
+        "✅ AGGIUNGERÀ il campo 'password' a tutti i dipendenti esistenti\n" +
+        "✅ NON cancellerà richieste o dati esistenti\n" +
+        "✅ GENERERÀ password temporanee per ogni dipendente\n\n" +
+        "Puoi sempre cambiare le password manualmente dalla tabella.\n\n" +
+        "Procedere?"
+    );
+    
+    if (!conferma) return;
+    
+    // Mostra loading
+    const loadingToast = showLoadingToast("Migrazione in corso...");
+    
+    try {
+        // Recupera tutti i dipendenti (escluso admin)
+        const snapshot = await db.collection('users')
+            .where('role', '==', 'dipendente')
+            .get();
+        
+        let aggiornati = 0;
+        let errori = 0;
+        const risultati = [];
+        
+        for (const doc of snapshot.docs) {
+            const userData = doc.data();
+            const userId = doc.id;
+            const userName = userData.name;
+            
+            // Se ha già una password, salta
+            if (userData.password && userData.password !== 'N/D') {
+                console.log(`⏭️ ${userName} ha già password, salto...`);
+                continue;
+            }
+            
+            // Genera password temporanea (nome + numeri)
+            const nomeBase = userName.split(' ')[0].toLowerCase();
+            const passwordTemp = `${nomeBase}123`;
+            
+            try {
+                // Aggiorna il documento con la password
+                await db.collection('users').doc(userId).update({
+                    password: passwordTemp,
+                    temporaryPassword: true,
+                    migratedAt: firebase.firestore.FieldValue.serverTimestamp(),
+                    migratedBy: appState.currentUser?.uid
+                });
+                
+                risultati.push({
+                    nome: userName,
+                    email: userData.email,
+                    password: passwordTemp
+                });
+                
+                aggiornati++;
+                console.log(`✅ Migrato: ${userName} - Pwd: ${passwordTemp}`);
+                
+            } catch (err) {
+                errori++;
+                console.error(`❌ Errore per ${userName}:`, err);
+            }
+        }
+        
+        closeLoadingToast(loadingToast);
+        
+        // Mostra risultati
+        let message = `✅ MIGRAZIONE COMPLETATA!\n\n`;
+        message += `📊 Dipendenti aggiornati: ${aggiornati}\n`;
+        message += `❌ Errori: ${errori}\n\n`;
+        
+        if (risultati.length > 0) {
+            message += `📋 PASSWORD GENERATE:\n`;
+            message += `━━━━━━━━━━━━━━━━━━━━━━\n`;
+            risultati.slice(0, 10).forEach(r => {
+                message += `👤 ${r.nome}\n`;
+                message += `📧 ${r.email}\n`;
+                message += `🔑 ${r.password}\n`;
+                message += `━━━━━━━━━━━━━━━━━━━━━━\n`;
+            });
+            
+            if (risultati.length > 10) {
+                message += `... e altri ${risultati.length - 10} dipendenti\n`;
+            }
+            
+            message += `\n💡 Puoi vedere/modificare tutte le password nella tabella dipendenti!`;
+        }
+        
+        showFeedback('✅ Migrazione Completata', message, true);
+        
+        // Ricarica la tabella
+        if (document.getElementById('employeesList')?.style.display === 'block') {
+            await loadEmployeesList();
+        }
+        
+        showToast(`Migrazione completata! ${aggiornati} dipendenti aggiornati.`, 'success');
+        
+    } catch (error) {
+        console.error('Errore migrazione:', error);
+        closeLoadingToast(loadingToast);
+        showFeedback('Errore', `Migrazione fallita: ${error.message}`);
+    }
+}
+async function showChangePasswordForEmployee(userId, userName) {
+    const modal = document.createElement('dialog');
+    modal.id = 'changePasswordEmployeeDialog';
+    modal.className = 'modal';
+    modal.innerHTML = `
+        <div class="modal-content">
+            <h3>🔑 Cambia Password</h3>
+            <p>Dipendente: <strong>${escapeHtml(userName)}</strong></p>
+            
+            <div class="form-group">
+                <label class="form-label">Nuova Password</label>
+                <input type="text" id="newPasswordInput" class="form-control" placeholder="Inserisci nuova password" autocomplete="off">
+                <button type="button" id="generatePasswordBtn" class="password-generate-btn">🎲 Genera casuale</button>
+            </div>
+            
+            <div class="form-group">
+                <label class="form-label">Conferma Password</label>
+                <input type="text" id="confirmPasswordInput" class="form-control" placeholder="Conferma password">
+            </div>
+            
+            <div id="passwordStrengthMsg" class="password-strength" style="margin-bottom: 16px;"></div>
+            
+            <div class="modal-actions">
+                <button id="savePasswordBtn" class="btn btn-primary">💾 Salva Password</button>
+                <button id="cancelPasswordBtn" class="btn btn-secondary">Annulla</button>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+    modal.showModal();
+    
+    const newPwdInput = document.getElementById('newPasswordInput');
+    const confirmInput = document.getElementById('confirmPasswordInput');
+    const strengthMsg = document.getElementById('passwordStrengthMsg');
+    
+    // Genera password casuale
+    document.getElementById('generatePasswordBtn').addEventListener('click', () => {
+        const randomPwd = generateRandomPassword();
+        newPwdInput.value = randomPwd;
+        confirmInput.value = randomPwd;
+        checkPasswordStrengthLive(randomPwd, strengthMsg);
+    });
+    
+    // Controlla forza password in tempo reale
+    newPwdInput.addEventListener('input', () => {
+        checkPasswordStrengthLive(newPwdInput.value, strengthMsg);
+    });
+    
+    // Salva
+    document.getElementById('savePasswordBtn').addEventListener('click', async () => {
+        const newPassword = newPwdInput.value;
+        const confirmPassword = confirmInput.value;
+        
+        if (!newPassword) {
+            showFeedback('Errore', 'Inserisci una password');
+            return;
+        }
+        
+        if (newPassword.length < 6) {
+            showFeedback('Errore', 'La password deve avere almeno 6 caratteri');
+            return;
+        }
+        
+        if (newPassword !== confirmPassword) {
+            showFeedback('Errore', 'Le password non coincidono');
+            return;
+        }
+        
+        try {
+            // Salva la password nel database
+            await db.collection('users').doc(userId).update({
+                password: newPassword,
+                temporaryPassword: false,
+                passwordUpdatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+                passwordUpdatedBy: appState.currentUser?.uid
+            });
+            
+            showFeedback('Successo', `✅ Password cambiata per ${userName}<br><br>🔑 Nuova password: <strong>${escapeHtml(newPassword)}</strong>`, true);
+            
+            modal.close();
+            modal.remove();
+            
+            // Aggiorna la tabella
+            await loadEmployeesList();
+            
+        } catch (error) {
+            console.error('Errore cambio password:', error);
+            showFeedback('Errore', `Impossibile cambiare password: ${error.message}`);
+        }
+    });
+    
+    document.getElementById('cancelPasswordBtn').addEventListener('click', () => {
+        modal.close();
+        modal.remove();
+    });
+}
+
+function generateRandomPassword() {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
+    let password = '';
+    for (let i = 0; i < 8; i++) {
+        password += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    return password;
+}
+
+function checkPasswordStrengthLive(password, element) {
+    if (!password) {
+        element.textContent = '';
+        return;
+    }
+    
+    let strength = 'Debole';
+    let className = 'weak';
+    
+    if (password.length >= 8 && /[A-Z]/.test(password) && /[0-9]/.test(password)) {
+        strength = 'Forte';
+        className = 'strong';
+    } else if (password.length >= 6 && (/[A-Z]/.test(password) || /[0-9]/.test(password))) {
+        strength = 'Media';
+        className = 'medium';
+    }
+    
+    element.textContent = `Forza password: ${strength}`;
+    element.className = `password-strength ${className}`;
+}
+async function showResetPasswordForEmployee(userId, userName, email) {
+    const conferma = confirm(
+        `🔄 RESET PASSWORD\n\n` +
+        `Dipendente: ${userName}\n` +
+        `Email: ${email}\n\n` +
+        `Vuoi resettare la password?\n\n` +
+        `Una nuova password verrà generata automaticamente.`
+    );
+    
+    if (!conferma) return;
+    
+    const newPassword = generateRandomPassword();
+    
+    try {
+        // Salva la nuova password
+        await db.collection('users').doc(userId).update({
+            password: newPassword,
+            temporaryPassword: true,
+            passwordResetAt: firebase.firestore.FieldValue.serverTimestamp(),
+            passwordResetBy: appState.currentUser?.uid
+        });
+        
+        showFeedback('Reset Password', 
+            `✅ Password resettata per ${userName}<br><br>` +
+            `🔑 Nuova password: <strong style="font-size:1.2rem;">${escapeHtml(newPassword)}</strong><br><br>` +
+            `📧 Email: ${escapeHtml(email)}<br><br>` +
+            `⚠️ Comunica la nuova password al dipendente.`, 
+            true);
+        
+        await loadEmployeesList();
+        
+    } catch (error) {
+        console.error('Errore reset:', error);
+        showFeedback('Errore', `Reset fallito: ${error.message}`);
+    }
+}
+
+
 function updateTableDataLabelsEmployees() {
     const headers = document.querySelectorAll('#employeesList .requests-table th');
     const headerTexts = Array.from(headers).map(th => th.textContent.trim());
@@ -2836,8 +3579,12 @@ function setupUI() {
     // Aggiorna display ore residue
     if (!isAdmin) {
         aggiornaDisplayOreResidue();
+        
     }
-    
+    if (isAdmin) {
+    addMigrationButton(); 
+    addTransferDataButton(); // ✅ Spostato qui
+}
     loadRequests();
     setupRealtimeListener();
     
@@ -2860,7 +3607,50 @@ function setupUI() {
     }
     
     announceToScreenReader(`Accesso effettuato come ${userData.name}`);
+        // Aggiungi bottone migrazione se admin
+    if (appState.isAdmin) {
+        addMigrationButton();
+    }
 }
+function addTransferDataButton() {
+    const adminActions = document.querySelector('.admin-actions');
+    if (!adminActions) return;
+    if (document.getElementById('transferDataBtn')) return;
+    
+    const transferBtn = document.createElement('button');
+    transferBtn.id = 'transferDataBtn';
+    transferBtn.className = 'btn btn-info';
+    transferBtn.innerHTML = '📦 Trasferisci Dati per Nome';
+    transferBtn.title = 'Trasferisci richieste e ore residue cercando per NOME';
+    transferBtn.style.background = 'linear-gradient(135deg, #06b6d4, #0891b2)';
+    transferBtn.style.marginLeft = '10px';
+    transferBtn.addEventListener('click', transferEmployeeDataByName);
+    adminActions.appendChild(transferBtn);
+}
+    // Aggiungi questa funzione a setupUI() o in un punto dove viene eseguito quando l'admin è loggato
+function addMigrationButton() {
+    // Controlla se l'admin è loggato
+    if (!appState.isAdmin) return;
+    
+    const adminActions = document.querySelector('.admin-actions');
+    if (!adminActions) return;
+    
+    // Evita duplicati
+    if (document.getElementById('migrationBtn')) return;
+    
+    const migrationBtn = document.createElement('button');
+    migrationBtn.id = 'migrationBtn';
+    migrationBtn.className = 'btn btn-warning';
+    migrationBtn.innerHTML = '🔄 Migra Dipendenti Esistenti';
+    migrationBtn.title = 'Aggiungi password ai dipendenti già registrati';
+    migrationBtn.style.background = 'linear-gradient(135deg, #8b5cf6, #6d28d9)';
+    
+    migrationBtn.addEventListener('click', migrateExistingEmployees);
+    
+    adminActions.appendChild(migrationBtn);
+}
+
+
 
 function addAttachmentFieldToMalattiaForm() {
     const malattiaForm = document.getElementById('malattiaForm');
@@ -3721,6 +4511,7 @@ function initializeApp() {
     
     console.log('✅ Applicazione avviata');
 }
+
 
 // Avvio applicazione
 document.addEventListener('DOMContentLoaded', initializeApp);

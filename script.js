@@ -1359,15 +1359,16 @@ function renderEmployeesPageWithOre() {
         const oreEditBtn = row.querySelector('.btn-edit-ore');
         if (oreEditBtn) {
             oreEditBtn.addEventListener('click', () => {
-                showEditOreModal(
-                    oreEditBtn.dataset.id,
-                    oreEditBtn.dataset.name,
-                    parseInt(oreEditBtn.dataset.ferie),
-                    parseInt(oreEditBtn.dataset.permessi)
-                );
+             showEditOreModal(oreEditBtn.dataset.id, oreEditBtn.dataset.name, {
+    oreFerieAnno: parseInt(oreEditBtn.dataset.ferieAnno),
+    orePermessiAnno: parseInt(oreEditBtn.dataset.permessiAnno),
+    oreFerieUtilizzate: parseInt(oreEditBtn.dataset.ferieUtilizzate) || 0,
+    orePermessiUtilizzate: parseInt(oreEditBtn.dataset.permessiUtilizzate) || 0,
+    oreFeriePrecedenti: parseInt(oreEditBtn.dataset.feriePrecedenti) || 0,
+    orePermessiPrecedenti: parseInt(oreEditBtn.dataset.permessiPrecedenti) || 0
+});
             });
-        }
-        
+        }  
         employeesBody.appendChild(row);
     });
 }
@@ -1979,7 +1980,7 @@ async function registerEmployee() {
             createdByName: appState.currentUserData.name
         });
         
-        showFeedback('Successo', `✅ Dipendente registrato!<br><br>📧 Email: ${escapeHtml(email)}<br>🔑 Password: ${CONSTANTS.TEMPASSWORD}`, true);
+        showFeedback('Successo', `✅ Dipendente registrato!<br><br>📧 Email: ${escapeHtml(email)}<br>🔑 Password: ${CONSTANTS.TEMP_PASSWORD}`, true);
         
         const employeesList = document.getElementById('employeesList');
         if (employeesList?.style.display === 'block') {

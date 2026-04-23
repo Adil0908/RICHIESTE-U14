@@ -606,17 +606,25 @@ async function getOreResidue(userId, anno = new Date().getFullYear()) {
 }
 
 // Aggiorna contatore ore dopo modifica stato richiesta
+// Aggiorna contatore ore dopo modifica stato richiesta
 async function aggiornaContatoreOre(userId, tipoRichiesta, ore, operazione = 'sottrai') {
     try {
         const annoCorrente = getAnnoCorrente();
         const userRef = db.collection('users').doc(userId);
         const userDoc = await userRef.get();
+        
+        // Se l'utente non esiste più, non fare nulla
+        if (!userDoc.exists) {
+            console.warn(`⚠️ Utente ${userId} non trovato in Firestore. Impossibile aggiornare le ore.`);
+            return;
+        }
+        
         const userData = userDoc.data();
         
-        // Prima consuma le ore residue dell'anno precedente, poi quelle dell'anno corrente
-        const orePrecedenti = tipoRichiesta === 'Ferie' 
+        // Assicurati che i campi esistano (valori di default)
+        const orePrecedenti = (tipoRichiesta === 'Ferie' 
             ? (userData.oreFeriePrecedenti || 0)
-            : (userData.orePermessiPrecedenti || 0);
+            : (userData.orePermessiPrecedenti || 0));
         
         const utilizzateField = getFieldName(`${tipoRichiesta === 'Ferie' ? 'oreFerieUtilizzate' : 'orePermessiUtilizzate'}`, annoCorrente);
         let nuoveUtilizzateAnno = userData[utilizzateField] || 0;
@@ -632,8 +640,7 @@ async function aggiornaContatoreOre(userId, tipoRichiesta, ore, operazione = 'so
                 nuoveUtilizzateAnno += oreDaAnnoCorrente;
             }
         } else {
-            // Aggiungi ore (revoca): aggiungi prima all'anno corrente, poi alle precedenti
-            // (logica inversa per mantenere la priorità)
+            // Aggiungi ore (revoca)
             const utilizateAnno = userData[utilizzateField] || 0;
             if (utilizateAnno >= ore) {
                 nuoveUtilizzateAnno = utilizateAnno - ore;
@@ -663,7 +670,8 @@ async function aggiornaContatoreOre(userId, tipoRichiesta, ore, operazione = 'so
         
     } catch (error) {
         console.error('Errore aggiornamento contatore:', error);
-        throw error;
+        // Non lanciare l'errore per non bloccare l'eliminazione
+        // throw error;
     }
 }
 // Ricalcola tutte le ore utilizzate da zero (utile per correzioni)
@@ -1014,19 +1022,23 @@ function renderRequests(docs) {
         attachRequestEventListeners(row, doc.id, data);
         richiesteBody.appendChild(row);
     });
-    updateTableDataLabels();
+    
+ 
+updateTableDataLabels();
 }
 
 function renderActionsCell(requestId, data, showEditButton) {
     if (appState.isAdmin) {
         return `
-            <select class="status-select" data-id="${requestId}">
-                <option value="In attesa" ${data.stato === 'In attesa' ? 'selected' : ''}>In attesa</option>
-                <option value="Approvato" ${data.stato === 'Approvato' ? 'selected' : ''}>Approvato</option>
-                <option value="Rifiutato" ${data.stato === 'Rifiutato' ? 'selected' : ''}>Rifiutato</option>
-            </select>
-            <button class="btn-small save-status" data-id="${requestId}">Salva</button>
-            <button class="btn-small btn-danger delete-request" data-id="${requestId}">Elimina</button>
+            <div class="admin-actions-cell">
+                <select class="status-select" data-id="${requestId}">
+                    <option value="In attesa" ${data.stato === 'In attesa' ? 'selected' : ''}>In attesa</option>
+                    <option value="Approvato" ${data.stato === 'Approvato' ? 'selected' : ''}>Approvato</option>
+                    <option value="Rifiutato" ${data.stato === 'Rifiutato' ? 'selected' : ''}>Rifiutato</option>
+                </select>
+                <button class="btn-small save-status" data-id="${requestId}">💾 Salva</button>
+                <button class="btn-small btn-danger delete-request" data-id="${requestId}">🗑️ Elimina</button>
+            </div>
         `;
     } else {
         let actions = '';
@@ -1034,7 +1046,7 @@ function renderActionsCell(requestId, data, showEditButton) {
             actions += `<button class="btn-small btn-edit edit-request" data-id="${requestId}" data-type="${data.tipo}">✏️ Modifica</button>`;
         }
         if (data.stato !== 'In attesa') {
-            actions += `<span class="text-muted" style="font-size: 12px;">Non modificabile</span>`;
+            actions += `<span class="text-muted" style="font-size: 12px; margin-left: 8px;">Non modificabile</span>`;
         }
         return actions;
     }
@@ -1047,15 +1059,31 @@ function attachRequestEventListeners(row, requestId, data) {
         const statusSelect = row.querySelector('.status-select');
         
         if (saveBtn) {
-            saveBtn.addEventListener('click', () => {
+            // Rimuovi vecchi listener per evitare duplicati
+            const newSaveBtn = saveBtn.cloneNode(true);
+            saveBtn.parentNode.replaceChild(newSaveBtn, saveBtn);
+            
+            newSaveBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
                 const newStatus = statusSelect.value;
                 updateRequestStatus(requestId, newStatus);
             });
         }
         
         if (deleteBtn) {
-            deleteBtn.addEventListener('click', () => {
-                showConfirmation('Elimina Richiesta', 'Sei sicuro di voler eliminare questa richiesta?', () => deleteRequest(requestId));
+            // Rimuovi vecchi listener per evitare duplicati
+            const newDeleteBtn = deleteBtn.cloneNode(true);
+            deleteBtn.parentNode.replaceChild(newDeleteBtn, deleteBtn);
+            
+            newDeleteBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                showConfirmation(
+                    'Elimina Richiesta', 
+                    'Sei sicuro di voler eliminare questa richiesta? Questa operazione è irreversibile.', 
+                    () => deleteRequest(requestId)
+                );
             });
         }
     } else {
@@ -1086,13 +1114,18 @@ async function updateRequestStatus(requestId, newStatus) {
             oreRichiesta = calcolaOrePermesso(requestData.oraInizio, requestData.oraFine);
         }
         
-        // Gestione aggiornamento contatori
-        if (newStatus === 'Approvato' && oldStatus !== 'Approvato') {
-            // Approvazione: sottrai le ore
-            await aggiornaContatoreOre(requestData.userId, requestData.tipo, oreRichiesta, 'sottrai');
-        } else if (newStatus !== 'Approvato' && oldStatus === 'Approvato') {
-            // Revoca approvazione: restituisci le ore
-            await aggiornaContatoreOre(requestData.userId, requestData.tipo, oreRichiesta, 'aggiungi');
+        // Gestione aggiornamento contatori (con try-catch per evitare errori)
+        if (oreRichiesta > 0 && requestData.userId) {
+            try {
+                if (newStatus === 'Approvato' && oldStatus !== 'Approvato') {
+                    await aggiornaContatoreOre(requestData.userId, requestData.tipo, oreRichiesta, 'sottrai');
+                } else if (newStatus !== 'Approvato' && oldStatus === 'Approvato') {
+                    await aggiornaContatoreOre(requestData.userId, requestData.tipo, oreRichiesta, 'aggiungi');
+                }
+            } catch (oreError) {
+                console.warn('⚠️ Attenzione: problema aggiornamento ore:', oreError);
+                // Continuiamo comunque con l'aggiornamento dello stato
+            }
         }
         
         // Aggiorna stato
@@ -1108,21 +1141,36 @@ async function updateRequestStatus(requestId, newStatus) {
         if (appState.isAdmin && typeof loadCalendarData === 'function') loadCalendarData();
         
         // Aggiorna display ore residue se l'utente è il richiedente
-        if (appState.currentUser && appState.currentUser.uid === requestData.userId) {
+        if (appState.currentUser && requestData.userId && appState.currentUser.uid === requestData.userId) {
             await aggiornaDisplayOreResidue();
         }
         
     } catch (error) {
+        console.error('Errore updateRequestStatus:', error);
         handleError(error, 'updateRequestStatus');
     }
 }
 
+
+// ==================== ELIMINA RICHIESTA ====================
 async function deleteRequest(requestId) {
+    if (!requestId) {
+        showFeedback('Errore', 'ID richiesta non valido');
+        return;
+    }
+    
     try {
+        // Recupera la richiesta prima di eliminarla
         const requestDoc = await db.collection('richieste').doc(requestId).get();
+        
+        if (!requestDoc.exists) {
+            showFeedback('Errore', 'Richiesta non trovata');
+            return;
+        }
+        
         const requestData = requestDoc.data();
         
-        // Se la richiesta era approvata, restituisci le ore
+        // Se la richiesta era approvata, restituisci le ore (solo se l'utente esiste ancora)
         if (requestData.stato === 'Approvato') {
             let oreRichiesta = 0;
             if (requestData.tipo === 'Ferie' && requestData.dataInizio && requestData.dataFine) {
@@ -1130,21 +1178,39 @@ async function deleteRequest(requestId) {
             } else if (requestData.tipo === 'Permesso' && requestData.oraInizio && requestData.oraFine) {
                 oreRichiesta = calcolaOrePermesso(requestData.oraInizio, requestData.oraFine);
             }
-            await aggiornaContatoreOre(requestData.userId, requestData.tipo, oreRichiesta, 'aggiungi');
+            
+            if (oreRichiesta > 0 && requestData.userId) {
+                try {
+                    await aggiornaContatoreOre(requestData.userId, requestData.tipo, oreRichiesta, 'aggiungi');
+                    console.log(`✅ Restituite ${oreRichiesta} ore a ${requestData.userName || requestData.userId}`);
+                } catch (oreError) {
+                    console.warn('⚠️ Impossibile restituire le ore (utente potrebbe non esistere più):', oreError);
+                    // Continuiamo comunque con l'eliminazione
+                }
+            }
         }
         
+        // Elimina la richiesta
         await db.collection('richieste').doc(requestId).delete();
-        showFeedback('Successo', 'Richiesta eliminata con successo');
-        await loadRequests();
-        if (appState.isAdmin && typeof loadCalendarData === 'function') loadCalendarData();
         
-        // Aggiorna display ore residue
-        if (appState.currentUser && appState.currentUser.uid === requestData.userId) {
+        showToast('✅ Richiesta eliminata con successo', 'success');
+        
+        // Ricarica la lista
+        await loadRequests();
+        
+        // Aggiorna calendario se admin
+        if (appState.isAdmin && typeof loadCalendarData === 'function') {
+            await loadCalendarData();
+        }
+        
+        // Aggiorna display ore residue se l'utente è il richiedente
+        if (appState.currentUser && requestData.userId && appState.currentUser.uid === requestData.userId) {
             await aggiornaDisplayOreResidue();
         }
         
     } catch (error) {
-        handleError(error, 'deleteRequest');
+        console.error('Errore deleteRequest:', error);
+        showFeedback('Errore', `Impossibile eliminare la richiesta: ${error.message}`);
     }
 }
 // ==================== FUNZIONI ADMIN PER GESTIONE ORE ====================

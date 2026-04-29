@@ -1477,3 +1477,38 @@ h3 { font-size: 1.25rem; }
     border-left-color: var(--danger);
     background: var(--danger-soft);
 }
+/* Checkbox per giornata intera */
+.form-checkbox {
+    width: 18px;
+    height: 18px;
+    margin-right: 8px;
+    vertical-align: middle;
+    cursor: pointer;
+    accent-color: var(--primary);
+}
+
+#permessiGiornataIntera {
+    transform: scale(1.1);
+    margin-right: 10px;
+}
+
+#permessiGiornataIntera + label {
+    cursor: pointer;
+    font-weight: 500;
+    color: var(--text-secondary);
+}
+
+#permessiGiornataIntera:checked + label {
+    color: var(--primary);
+}
+
+/* Stile per container orari disabilitato */
+#permessiOrariContainer.disabled {
+    opacity: 0.5;
+    pointer-events: none;
+}
+
+/* Animazione per il toggle */
+#permessiOrariContainer {
+    transition: opacity 0.2s ease;
+}

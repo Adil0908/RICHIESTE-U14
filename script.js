@@ -727,6 +727,8 @@ async function aggiornaDisplayOreResidue() {
     const ferieForm = document.getElementById('ferie');
     if (ferieForm) {
         let oreIndicator = document.getElementById('oreFerieIndicator');
+        const isNegative = totali.ferie < 0;
+        
         if (!oreIndicator) {
             const formHeader = ferieForm.querySelector('h3');
             if (formHeader) {
@@ -736,23 +738,31 @@ async function aggiornaDisplayOreResidue() {
                 indicator.innerHTML = `
                     <div class="ore-residue-info">
                         <div class="ore-label">🏖️ Ore ferie disponibili:</div>
-                        <div class="ore-value ${totali.ferie < 40 ? 'ore-basse' : ''}">${totali.ferie}h</div>
+                        <div class="ore-value ${isNegative ? 'ore-negative' : (totali.ferie < 40 ? 'ore-basse' : '')}">${totali.ferie}h</div>
                     </div>
                     <div class="ore-dettaglio">
                         <small>📅 Anno corrente: ${totali.ferieAnnoCorrente}h</small>
-                        ${totali.feriePrecedenti > 0 ? `<small>📦 Residuo anni precedenti: +${totali.feriePrecedenti}h</small>` : ''}
-                        ${totali.feriePrecedenti < 0 ? `<small class="text-danger">⚠️ Negativo da recuperare: ${totali.feriePrecedenti}h</small>` : ''}
+                        ${totali.feriePrecedenti !== 0 ? `<small>📦 Residuo anni precedenti: ${totali.feriePrecedenti >= 0 ? '+' : ''}${totali.feriePrecedenti}h</small>` : ''}
+                        ${isNegative ? `<small class="text-danger">⚠️ ATTENZIONE: Ore negative da recuperare!</small>` : ''}
                     </div>
                 `;
                 formHeader.insertAdjacentElement('afterend', indicator);
             }
         } else {
-            oreIndicator.querySelector('.ore-value').textContent = `${totali.ferie}h`;
+            const valueSpan = oreIndicator.querySelector('.ore-value');
+            valueSpan.textContent = `${totali.ferie}h`;
+            if (isNegative) {
+                valueSpan.classList.add('ore-negative');
+            } else if (totali.ferie < 40) {
+                valueSpan.classList.add('ore-basse');
+            }
+            
             const dettaglioDiv = oreIndicator.querySelector('.ore-dettaglio');
             if (dettaglioDiv) {
                 dettaglioDiv.innerHTML = `
                     <small>📅 Anno corrente: ${totali.ferieAnnoCorrente}h</small>
                     ${totali.feriePrecedenti !== 0 ? `<small>📦 Residuo anni precedenti: ${totali.feriePrecedenti >= 0 ? '+' : ''}${totali.feriePrecedenti}h</small>` : ''}
+                    ${isNegative ? `<small class="text-danger">⚠️ ATTENZIONE: Ore negative da recuperare!</small>` : ''}
                 `;
             }
         }
@@ -762,6 +772,8 @@ async function aggiornaDisplayOreResidue() {
     const permessiForm = document.getElementById('permessi');
     if (permessiForm) {
         let oreIndicator = document.getElementById('orePermessiIndicator');
+        const isNegative = totali.permessi < 0;
+        
         if (!oreIndicator) {
             const formHeader = permessiForm.querySelector('h3');
             if (formHeader) {
@@ -771,23 +783,31 @@ async function aggiornaDisplayOreResidue() {
                 indicator.innerHTML = `
                     <div class="ore-residue-info">
                         <div class="ore-label">⏰ Ore permessi disponibili:</div>
-                        <div class="ore-value ${totali.permessi < 20 ? 'ore-basse' : ''}">${totali.permessi}h</div>
+                        <div class="ore-value ${isNegative ? 'ore-negative' : (totali.permessi < 20 ? 'ore-basse' : '')}">${totali.permessi}h</div>
                     </div>
                     <div class="ore-dettaglio">
                         <small>📅 Anno corrente: ${totali.permessiAnnoCorrente}h</small>
-                        ${totali.permessiPrecedenti > 0 ? `<small>📦 Residuo anni precedenti: +${totali.permessiPrecedenti}h</small>` : ''}
-                        ${totali.permessiPrecedenti < 0 ? `<small class="text-danger">⚠️ Negativo da recuperare: ${totali.permessiPrecedenti}h</small>` : ''}
+                        ${totali.permessiPrecedenti !== 0 ? `<small>📦 Residuo anni precedenti: ${totali.permessiPrecedenti >= 0 ? '+' : ''}${totali.permessiPrecedenti}h</small>` : ''}
+                        ${isNegative ? `<small class="text-danger">⚠️ ATTENZIONE: Ore negative da recuperare!</small>` : ''}
                     </div>
                 `;
                 formHeader.insertAdjacentElement('afterend', indicator);
             }
         } else {
-            oreIndicator.querySelector('.ore-value').textContent = `${totali.permessi}h`;
+            const valueSpan = oreIndicator.querySelector('.ore-value');
+            valueSpan.textContent = `${totali.permessi}h`;
+            if (isNegative) {
+                valueSpan.classList.add('ore-negative');
+            } else if (totali.permessi < 20) {
+                valueSpan.classList.add('ore-basse');
+            }
+            
             const dettaglioDiv = oreIndicator.querySelector('.ore-dettaglio');
             if (dettaglioDiv) {
                 dettaglioDiv.innerHTML = `
                     <small>📅 Anno corrente: ${totali.permessiAnnoCorrente}h</small>
                     ${totali.permessiPrecedenti !== 0 ? `<small>📦 Residuo anni precedenti: ${totali.permessiPrecedenti >= 0 ? '+' : ''}${totali.permessiPrecedenti}h</small>` : ''}
+                    ${isNegative ? `<small class="text-danger">⚠️ ATTENZIONE: Ore negative da recuperare!</small>` : ''}
                 `;
             }
         }
@@ -1477,18 +1497,13 @@ async function handleFerieSubmit(e) {
         return;
     }
     
-    // VERIFICA ORE TOTALI (anno corrente + precedenti)
+    // VERIFICA ORE TOTALI (solo avviso, non blocco)
     const totali = await getOreTotali(appState.currentUser.uid);
-    if (oreRichiesta > totali.ferie) {
-        showFeedback('Errore', 
-            `❌ Ore ferie insufficienti!\n\n` +
-            `Richiedi: ${oreRichiesta}h\n` +
-            `Disponibili: ${totali.ferie}h\n` +
-            `📅 Anno corrente: ${totali.ferieAnnoCorrente}h\n` +
-            `📦 Residuo precedente: ${totali.feriePrecedenti >= 0 ? '+' : ''}${totali.feriePrecedenti}h\n` +
-            `Mancano: ${oreRichiesta - totali.ferie}h`, 
-            true);
-        return;
+    const oreMancanti = oreRichiesta - totali.ferie;
+    let avviso = '';
+    
+    if (oreMancanti > 0) {
+        avviso = `\n\n⚠️ ATTENZIONE: Richiedi ${oreRichiesta}h ma hai solo ${totali.ferie}h disponibili.\nIl contatore andrà in negativo di -${oreMancanti}h.\n\n`;
     }
     
     try {
@@ -1506,13 +1521,19 @@ async function handleFerieSubmit(e) {
         
         document.getElementById('ferieForm').reset();
         document.getElementById('ferieGiorni').value = '';
-        showFeedback('Successo', 
-            `✅ Richiesta ferie inviata!\n\n` +
-            `📅 Periodo: ${giorni} giorni\n` +
-            `⏰ Ore richieste: ${oreRichiesta}h\n` +
-            `📊 Ore residue dopo approvazione: ${totali.ferie - oreRichiesta}h`, 
-            true);
+        
+        let messaggio = `✅ Richiesta ferie inviata!\n\n📅 Periodo: ${giorni} giorni\n⏰ Ore richieste: ${oreRichiesta}h`;
+        if (oreMancanti > 0) {
+            messaggio += `\n⚠️ Ore residue dopo approvazione: ${totali.ferie - oreRichiesta}h (NEGATIVO)`;
+        } else {
+            messaggio += `\n📊 Ore residue dopo approvazione: ${totali.ferie - oreRichiesta}h`;
+        }
+        
+        showFeedback('Successo', messaggio, true);
         await loadRequests();
+        
+        // Aggiorna display ore residue (mostrerà il negativo dopo approvazione)
+        await aggiornaDisplayOreResidue();
         
     } catch (error) {
         handleError(error, 'handleFerieSubmit');
@@ -1633,18 +1654,13 @@ async function handlePermessiSubmit(e) {
     
     const oreRichiesta = calcolaOrePermesso(oraInizio, oraFine);
     
-    // VERIFICA ORE TOTALI
+    // VERIFICA ORE TOTALI (solo avviso, non blocco)
     const totali = await getOreTotali(appState.currentUser.uid);
-    if (oreRichiesta > totali.permessi) {
-        showFeedback('Errore', 
-            `❌ Ore permessi insufficienti!\n\n` +
-            `Richiedi: ${oreRichiesta}h\n` +
-            `Disponibili: ${totali.permessi}h\n` +
-            `📅 Anno corrente: ${totali.permessiAnnoCorrente}h\n` +
-            `📦 Residuo precedente: ${totali.permessiPrecedenti >= 0 ? '+' : ''}${totali.permessiPrecedenti}h\n` +
-            `Mancano: ${(oreRichiesta - totali.permessi).toFixed(1)}h`, 
-            true);
-        return;
+    const oreMancanti = oreRichiesta - totali.permessi;
+    let avviso = '';
+    
+    if (oreMancanti > 0) {
+        avviso = `\n\n⚠️ ATTENZIONE: Richiedi ${oreRichiesta}h ma hai solo ${totali.permessi}h disponibili.\nIl contatore andrà in negativo di -${oreMancanti.toFixed(1)}h.\n\n`;
     }
     
     try {
@@ -1662,13 +1678,19 @@ async function handlePermessiSubmit(e) {
         });
         
         document.getElementById('permessiForm').reset();
-        showFeedback('Successo', 
-            `✅ Richiesta permesso inviata!\n\n` +
-            `📅 Data: ${data.toLocaleDateString('it-IT')}\n` +
-            `⏰ Ore richieste: ${oreRichiesta}h\n` +
-            `📊 Ore residue dopo approvazione: ${totali.permessi - oreRichiesta}h`, 
-            true);
+        
+        let messaggio = `✅ Richiesta permesso inviata!\n\n📅 Data: ${data.toLocaleDateString('it-IT')}\n⏰ Ore richieste: ${oreRichiesta}h`;
+        if (oreMancanti > 0) {
+            messaggio += `\n⚠️ Ore residue dopo approvazione: ${(totali.permessi - oreRichiesta).toFixed(1)}h (NEGATIVO)`;
+        } else {
+            messaggio += `\n📊 Ore residue dopo approvazione: ${(totali.permessi - oreRichiesta).toFixed(1)}h`;
+        }
+        
+        showFeedback('Successo', messaggio, true);
         await loadRequests();
+        
+        // Aggiorna display ore residue (mostrerà il negativo dopo approvazione)
+        await aggiornaDisplayOreResidue();
         
     } catch (error) {
         handleError(error, 'handlePermessiSubmit');

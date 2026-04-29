@@ -1014,11 +1014,21 @@ function renderRequests(docs) {
                 dettagli = `Cert. n. ${escapeHtml(data.numeroCertificato || '')}`;
                 break;
             case 'Permesso':
-                const permDate = data.data?.toDate();
-                periodo = permDate ? permDate.toLocaleDateString('it-IT') : 'N/D';
-                dettagli = `${data.oraInizio} - ${data.oraFine}`;
-                if (data.motivazione) dettagli += ` (${escapeHtml(data.motivazione)})`;
-                break;
+    const permDate = data.data?.toDate();
+    periodo = permDate ? permDate.toLocaleDateString('it-IT') : 'N/D';
+    
+    // Se è una giornata intera, mostra in modo speciale
+    if (data.giornataIntera) {
+        dettagli = `🌞 GIORNATA INTERA - ${data.oraInizio} / ${data.oraFine}`;
+        if (data.fascia) {
+            dettagli = `🌞 GIORNATA INTERA (${data.fascia === 'mattina' ? 'mattina' : 'pomeriggio'}) - ${data.oraInizio}:${data.oraFine}`;
+        }
+    } else {
+        dettagli = `${data.oraInizio} - ${data.oraFine}`;
+    }
+    
+    if (data.motivazione) dettagli += ` (${escapeHtml(data.motivazione)})`;
+    break;
         }
         
         const row = document.createElement('tr');
@@ -1631,9 +1641,6 @@ async function handlePermessiSubmit(e) {
     }
     
     const data = new Date(document.getElementById('permessiData').value);
-    const oraInizio = document.getElementById('permessiOraInizio')?.value;
-    const oraFine = document.getElementById('permessiOraFine')?.value;
-    const motivazione = document.getElementById('permessiMotivazione')?.value?.trim();
     const oggi = new Date();
     oggi.setHours(0, 0, 0);
     
@@ -1642,58 +1649,155 @@ async function handlePermessiSubmit(e) {
         return;
     }
     
-    if (!oraInizio || !oraFine) {
-        showFeedback('Errore', 'Le ore di inizio e fine sono obbligatorie');
-        return;
-    }
+    // Controlla se è selezionata la giornata intera
+    const isGiornataIntera = document.getElementById('permessiGiornataIntera')?.checked || false;
     
-    if (oraInizio >= oraFine) {
-        showFeedback('Errore', 'L\'ora di fine deve essere successiva all\'ora di inizio');
-        return;
-    }
+    let oreRichiesta = 0;
+    let richiesteDaInviare = [];
+    let motivazione = document.getElementById('permessiMotivazione')?.value?.trim() || '';
     
-    const oreRichiesta = calcolaOrePermesso(oraInizio, oraFine);
+    if (isGiornataIntera) {
+        // Richiesta giornata intera: due fasce orarie separate
+        richiesteDaInviare = [
+            {
+                oraInizio: '08:00',
+                oraFine: '12:00',
+                oreRichiesta: 4,
+                fascia: 'mattina'
+            },
+            {
+                oraInizio: '13:00',
+                oraFine: '17:00',
+                oreRichiesta: 4,
+                fascia: 'pomeriggio'
+            }
+        ];
+        oreRichiesta = 8;
+    } else {
+        // Richiesta normale con orari personalizzati
+        const oraInizio = document.getElementById('permessiOraInizio')?.value;
+        const oraFine = document.getElementById('permessiOraFine')?.value;
+        
+        if (!oraInizio || !oraFine) {
+            showFeedback('Errore', 'Le ore di inizio e fine sono obbligatorie');
+            return;
+        }
+        
+        if (oraInizio >= oraFine) {
+            showFeedback('Errore', 'L\'ora di fine deve essere successiva all\'ora di inizio');
+            return;
+        }
+        
+        // Calcola le ore (con gestione mezz'ore)
+        oreRichiesta = calcolaOrePermesso(oraInizio, oraFine);
+        
+        richiesteDaInviare = [
+            {
+                oraInizio: oraInizio,
+                oraFine: oraFine,
+                oreRichiesta: oreRichiesta,
+                fascia: 'personalizzato'
+            }
+        ];
+    }
     
     // VERIFICA ORE TOTALI (solo avviso, non blocco)
     const totali = await getOreTotali(appState.currentUser.uid);
     const oreMancanti = oreRichiesta - totali.permessi;
-    let avviso = '';
     
-    if (oreMancanti > 0) {
-        avviso = `\n\n⚠️ ATTENZIONE: Richiedi ${oreRichiesta}h ma hai solo ${totali.permessi}h disponibili.\nIl contatore andrà in negativo di -${oreMancanti.toFixed(1)}h.\n\n`;
+    // Conferma per giornata intera
+    if (isGiornataIntera) {
+        const conferma = confirm(
+            `⚠️ RICHIESTA GIORNATA INTERA (8 ORE)\n\n` +
+            `📅 Data: ${data.toLocaleDateString('it-IT')}\n` +
+            `⏰ Fasce: 08:00-12:00 e 13:00-17:00\n` +
+            `📊 Ore richieste: 8h\n` +
+            `🏖️ Ore disponibili: ${totali.permessi}h\n` +
+            (oreMancanti > 0 ? `⚠️ Andrà in negativo di -${oreMancanti}h\n\n` : `\n`) +
+            `Procedere con l'invio?`
+        );
+        
+        if (!conferma) return;
     }
     
     try {
-        await db.collection('richieste').add({
-            tipo: 'Permesso',
-            userId: appState.currentUser.uid,
-            userName: appState.currentUserData.name,
-            data: firebase.firestore.Timestamp.fromDate(data),
-            oraInizio: oraInizio,
-            oraFine: oraFine,
-            oreRichiesta: oreRichiesta,
-            motivazione: sanitizeInput(motivazione) || '',
-            stato: 'In attesa',
-            createdAt: firebase.firestore.FieldValue.serverTimestamp()
-        });
+        const submitBtn = e.target.querySelector('button[type="submit"]');
+        setLoadingState(submitBtn, true);
         
+        let inviate = 0;
+        let errori = 0;
+        
+        // Invia ogni richiesta (una per fascia oraria se giornata intera)
+        for (const richiesta of richiesteDaInviare) {
+            try {
+                const richiestaData = {
+                    tipo: 'Permesso',
+                    userId: appState.currentUser.uid,
+                    userName: appState.currentUserData.name,
+                    data: firebase.firestore.Timestamp.fromDate(data),
+                    oraInizio: richiesta.oraInizio,
+                    oraFine: richiesta.oraFine,
+                    oreRichiesta: richiesta.oreRichiesta,
+                    motivazione: isGiornataIntera 
+                        ? `${motivazione ? motivazione + ' - ' : ''}Giornata intera (${richiesta.fascia})`
+                        : sanitizeInput(motivazione),
+                    stato: 'In attesa',
+                    createdAt: firebase.firestore.FieldValue.serverTimestamp()
+                };
+                
+                // Aggiungi flag per giornata intera
+                if (isGiornataIntera) {
+                    richiestaData.giornataIntera = true;
+                    richiestaData.fascia = richiesta.fascia;
+                }
+                
+                await db.collection('richieste').add(richiestaData);
+                inviate++;
+                
+            } catch (err) {
+                console.error('Errore invio richiesta:', err);
+                errori++;
+            }
+        }
+        
+        // Reset form
         document.getElementById('permessiForm').reset();
+        const checkbox = document.getElementById('permessiGiornataIntera');
+        if (checkbox) checkbox.checked = false;
         
-        let messaggio = `✅ Richiesta permesso inviata!\n\n📅 Data: ${data.toLocaleDateString('it-IT')}\n⏰ Ore richieste: ${oreRichiesta}h`;
-        if (oreMancanti > 0) {
-            messaggio += `\n⚠️ Ore residue dopo approvazione: ${(totali.permessi - oreRichiesta).toFixed(1)}h (NEGATIVO)`;
+        // Mostra feedback
+        let messaggio = '';
+        if (isGiornataIntera) {
+            messaggio = `✅ Richiesta giornata intera inviata!\n\n`;
+            messaggio += `📅 Data: ${data.toLocaleDateString('it-IT')}\n`;
+            messaggio += `⏰ Fasce: 08:00-12:00 e 13:00-17:00\n`;
+            messaggio += `📊 Totale ore richieste: 8h\n\n`;
+            messaggio += `✅ 2 richieste inviate con successo!\n`;
         } else {
-            messaggio += `\n📊 Ore residue dopo approvazione: ${(totali.permessi - oreRichiesta).toFixed(1)}h`;
+            messaggio = `✅ Richiesta permesso inviata!\n\n`;
+            messaggio += `📅 Data: ${data.toLocaleDateString('it-IT')}\n`;
+            messaggio += `⏰ Ore richieste: ${oreRichiesta}h\n`;
+        }
+        
+        if (oreMancanti > 0) {
+            messaggio += `⚠️ Ore residue dopo approvazione: ${(totali.permessi - oreRichiesta).toFixed(1)}h (NEGATIVO)`;
+        } else {
+            messaggio += `📊 Ore residue dopo approvazione: ${(totali.permessi - oreRichiesta).toFixed(1)}h`;
+        }
+        
+        if (errori > 0) {
+            messaggio += `\n\n⚠️ ${errori} richieste fallite. Contatta l'amministratore.`;
         }
         
         showFeedback('Successo', messaggio, true);
         await loadRequests();
-        
-        // Aggiorna display ore residue (mostrerà il negativo dopo approvazione)
         await aggiornaDisplayOreResidue();
         
     } catch (error) {
         handleError(error, 'handlePermessiSubmit');
+    } finally {
+        const submitBtn = e.target.querySelector('button[type="submit"]');
+        setLoadingState(submitBtn, false);
     }
 }
 
@@ -4185,6 +4289,47 @@ if (currentYearFilter) {
         applyFilters();
     });
 }
+function setupPermessiGiornataIntera() {
+    const checkbox = document.getElementById('permessiGiornataIntera');
+    const orariContainer = document.getElementById('permessiOrariContainer');
+    const oraInizio = document.getElementById('permessiOraInizio');
+    const oraFine = document.getElementById('permessiOraFine');
+    
+    if (checkbox && orariContainer) {
+        checkbox.addEventListener('change', function() {
+            if (this.checked) {
+                // Disabilita i campi orari e nascondili (opzionale)
+                if (oraInizio) {
+                    oraInizio.disabled = true;
+                    oraInizio.value = '';
+                    oraInizio.required = false;
+                }
+                if (oraFine) {
+                    oraFine.disabled = true;
+                    oraFine.value = '';
+                    oraFine.required = false;
+                }
+                // Aggiungi classe per stile visivo
+                orariContainer.style.opacity = '0.5';
+                orariContainer.style.pointerEvents = 'none';
+            } else {
+                // Riabilita i campi orari
+                if (oraInizio) {
+                    oraInizio.disabled = false;
+                    oraInizio.required = true;
+                }
+                if (oraFine) {
+                    oraFine.disabled = false;
+                    oraFine.required = true;
+                }
+                orariContainer.style.opacity = '1';
+                orariContainer.style.pointerEvents = 'auto';
+            }
+        });
+    }
+}
+// Aggiungi questa riga dentro initializeEventListeners()
+setupPermessiGiornataIntera();
 }
 
 function initializeModals() {

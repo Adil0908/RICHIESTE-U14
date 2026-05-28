@@ -32,6 +32,18 @@ const CONSTANTS = {
     ORE_PERMESSI_ANNUALI: 103  // 13 giorni * 8 ore
 };
 
+// Stato per storico assegnazioni
+const historyState = {
+    currentPage: 1,
+    pageSize: 3,  // 3 righe per pagina
+    totalItems: 0,
+    filteredItems: [],
+    filters: {
+        year: '',
+        month: '',
+        type: ''
+    }
+};
 // ==================== STATO APPLICAZIONE ====================
 const appState = {
     currentUser: null,
@@ -419,9 +431,10 @@ async function handleLogin(e) {
 
 async function handleLogout() {
     try {
-        if (appState.realtimeListener) {
-            appState.realtimeListener();
-            appState.realtimeListener = null;
+       // Rimuovi real-time listener delle ore
+        if (oreRealTimeListener) {
+            oreRealTimeListener();
+            oreRealTimeListener = null;
         }
         
         appState.listeners.forEach((listener, element) => {
@@ -749,12 +762,31 @@ async function aggiornaDisplayOreResidue() {
                 formHeader.insertAdjacentElement('afterend', indicator);
             }
         } else {
+            const oldValue = parseInt(oreIndicator.querySelector('.ore-value').textContent);
+            const newValue = totali.ferie;
+            
+            // Aggiorna il valore
             const valueSpan = oreIndicator.querySelector('.ore-value');
-            valueSpan.textContent = `${totali.ferie}h`;
+            valueSpan.textContent = `${newValue}h`;
+            
+            // Aggiungi animazione se il valore è cambiato
+            if (oldValue !== newValue) {
+                valueSpan.style.animation = 'none';
+                valueSpan.offsetHeight; // Trigger reflow
+                valueSpan.style.animation = 'pulseUpdate 0.5s ease';
+                
+                // Rimuovi animazione dopo
+                setTimeout(() => {
+                    valueSpan.style.animation = '';
+                }, 500);
+            }
+            
             if (isNegative) {
                 valueSpan.classList.add('ore-negative');
             } else if (totali.ferie < 40) {
                 valueSpan.classList.add('ore-basse');
+            } else {
+                valueSpan.classList.remove('ore-negative', 'ore-basse');
             }
             
             const dettaglioDiv = oreIndicator.querySelector('.ore-dettaglio');
@@ -768,7 +800,7 @@ async function aggiornaDisplayOreResidue() {
         }
     }
     
-    // Aggiorna indicatore permessi
+    // Aggiorna indicatore permessi (stessa logica)
     const permessiForm = document.getElementById('permessi');
     if (permessiForm) {
         let oreIndicator = document.getElementById('orePermessiIndicator');
@@ -794,12 +826,27 @@ async function aggiornaDisplayOreResidue() {
                 formHeader.insertAdjacentElement('afterend', indicator);
             }
         } else {
+            const oldValue = parseInt(oreIndicator.querySelector('.ore-value').textContent);
+            const newValue = totali.permessi;
+            
             const valueSpan = oreIndicator.querySelector('.ore-value');
-            valueSpan.textContent = `${totali.permessi}h`;
+            valueSpan.textContent = `${newValue}h`;
+            
+            if (oldValue !== newValue) {
+                valueSpan.style.animation = 'none';
+                valueSpan.offsetHeight;
+                valueSpan.style.animation = 'pulseUpdate 0.5s ease';
+                setTimeout(() => {
+                    valueSpan.style.animation = '';
+                }, 500);
+            }
+            
             if (isNegative) {
                 valueSpan.classList.add('ore-negative');
             } else if (totali.permessi < 20) {
                 valueSpan.classList.add('ore-basse');
+            } else {
+                valueSpan.classList.remove('ore-negative', 'ore-basse');
             }
             
             const dettaglioDiv = oreIndicator.querySelector('.ore-dettaglio');
@@ -3726,7 +3773,7 @@ function updateTableDataLabels() {
     });
 }
 // ==================== UI SETUP ====================
-function setupUI() {
+async function setupUI() {
     console.log('🎯 setupUI chiamata');
     
     const userData = appState.currentUserData;
@@ -3768,14 +3815,31 @@ function setupUI() {
     if (loginContainer) loginContainer.style.display = 'none';
     if (mainContainer) mainContainer.style.display = 'block';
     
-    // Aggiorna display ore residue
+    // Aggiorna display ore residue e avvia real-time listener
     if (!isAdmin) {
-        aggiornaDisplayOreResidue();
-        
+        await aggiornaDisplayOreResidue();
+        await aggiornaValoriOreMemorizzati();
+        setupOreRealTimeListener();  // <-- AVVIA IL LISTENER IN TEMPO REALE
+        await loadEmployeeAssignments();
     }
     if (isAdmin) {
     addMigrationButton(); 
     addTransferDataButton(); // ✅ Spostato qui
+    // Carica checklist per assegnazione collettiva
+    await loadEmployeesChecklist();
+    await loadBulkHistory();
+    initBulkAssignEvents();
+    addMigrationButton();
+    addTransferDataButton();
+    
+    // Bulk assign
+    try {
+        await loadEmployeesChecklist();
+        await loadBulkHistory();
+        initBulkAssignEvents();
+    } catch (error) {
+        console.error('Errore bulk assign:', error);
+    }
 }
     loadRequests();
     setupRealtimeListener();
@@ -4706,6 +4770,1307 @@ async function showResetHistory() {
     historyHtml += '</table></div>';
     
     showFeedback('📋 Storico Reset Annuale', historyHtml, true);
+}
+// ==================== BULK ASSIGN (ASSEGNAZIONE COLLETTIVA) ====================
+
+let currentEmployeesList = [];
+let currentHistoryData = [];
+
+// Carica la lista dipendenti
+async function loadEmployeesChecklist() {
+    const checklistDiv = document.getElementById('employeesChecklist');
+    if (!checklistDiv) return;
+    
+    try {
+        const snapshot = await db.collection('users')
+            .orderBy('name')
+            .get();
+        
+        currentEmployeesList = [];
+        snapshot.forEach(doc => {
+            const userData = doc.data();
+            if (userData.role === 'dipendente') {
+                currentEmployeesList.push({
+                    id: doc.id,
+                    name: userData.name,
+                    email: userData.email,
+                    oreFerieAnno: userData[getFieldName('oreFerie', getAnnoCorrente())] || CONSTANTS.ORE_FERIE_ANNUALI,
+                    orePermessiAnno: userData[getFieldName('orePermessi', getAnnoCorrente())] || CONSTANTS.ORE_PERMESSI_ANNUALI
+                });
+            }
+        });
+        
+        renderEmployeesChecklist();
+        
+    } catch (error) {
+        console.error('Errore caricamento dipendenti:', error);
+        checklistDiv.innerHTML = `<div class="error">Errore nel caricamento: ${error.message}</div>`;
+    }
+}
+
+function renderEmployeesChecklist() {
+    const checklistDiv = document.getElementById('employeesChecklist');
+    if (!checklistDiv) return;
+    
+    if (currentEmployeesList.length === 0) {
+        checklistDiv.innerHTML = '<div class="text-center">Nessun dipendente trovato</div>';
+        return;
+    }
+    
+    checklistDiv.innerHTML = '';
+    currentEmployeesList.forEach(emp => {
+        const item = document.createElement('div');
+        item.className = 'checklist-item';
+        item.innerHTML = `
+            <input type="checkbox" id="emp_${emp.id}" class="employee-checkbox" value="${emp.id}">
+            <label for="emp_${emp.id}">
+                <span>${escapeHtml(emp.name)}</span>
+                <span class="employee-email">${escapeHtml(emp.email)}</span>
+            </label>
+        `;
+        checklistDiv.appendChild(item);
+    });
+    
+    updateSelectedCount();
+    document.querySelectorAll('.employee-checkbox').forEach(cb => {
+        cb.addEventListener('change', updateSelectedCount);
+    });
+}
+
+function updateSelectedCount() {
+    const selected = document.querySelectorAll('.employee-checkbox:checked').length;
+    const countSpan = document.getElementById('selectedCount');
+    if (countSpan) {
+        countSpan.textContent = `${selected} selezionati su ${currentEmployeesList.length}`;
+    }
+}
+
+function getSelectedEmployees() {
+    const selectedCheckboxes = document.querySelectorAll('.employee-checkbox:checked');
+    return Array.from(selectedCheckboxes).map(cb => {
+        return currentEmployeesList.find(e => e.id === cb.value);
+    });
+}
+
+// Anteprima assegnazione
+async function previewBulkAssign() {
+    const selectedEmployees = getSelectedEmployees();
+    
+    if (selectedEmployees.length === 0) {
+        showFeedback('Errore', 'Seleziona almeno un dipendente');
+        return;
+    }
+    
+    const type = document.getElementById('bulkType').value;
+    const mode = document.getElementById('bulkMode').value;
+    const hours = parseInt(document.getElementById('bulkHours').value) || 0;
+    const reason = document.getElementById('bulkReason').value || 'Assegnazione collettiva';
+    const year = parseInt(document.getElementById('bulkYear').value) || getAnnoCorrente();
+    const assignDate = document.getElementById('bulkDate').value || new Date().toISOString().split('T')[0];
+    
+    if (hours <= 0) {
+        showFeedback('Errore', 'Le ore devono essere maggiori di 0');
+        return;
+    }
+    
+    const tipoTesto = type === 'ferie' ? '🏖️ Ferie' : '⏰ Permessi';
+    const modeTesto = mode === 'add' ? '➕ Aggiunta' : (mode === 'set' ? '📝 Imposta a' : '➖ Sottrazione');
+    
+    let previewHtml = `
+        <div class="preview-modal-content">
+            <h3>📋 Anteprima Assegnazione</h3>
+            <div class="preview-stats">
+                <p><strong>Tipo:</strong> ${tipoTesto}</p>
+                <p><strong>Operazione:</strong> ${modeTesto}</p>
+                <p><strong>Ore:</strong> ${hours}h</p>
+                <p><strong>Data Assegnazione:</strong> ${assignDate}</p>
+                <p><strong>Anno:</strong> ${year}</p>
+                <p><strong>Motivazione:</strong> ${escapeHtml(reason)}</p>
+                <p><strong>Dipendenti interessati:</strong> ${selectedEmployees.length}</p>
+            </div>
+            <div class="preview-list">
+                <strong>📋 Elenco dipendenti:</strong>
+                <ul>
+                    ${selectedEmployees.map(emp => `<li>${escapeHtml(emp.name)} - Stato attuale: ${tipoTesto} ${emp[type === 'ferie' ? 'oreFerieAnno' : 'orePermessiAnno']}h</li>`).join('')}
+                </ul>
+            </div>
+            <div class="modal-actions">
+                <button id="confirmPreviewBtn" class="btn btn-warning">✅ Conferma Assegnazione</button>
+                <button id="closePreviewBtn" class="btn btn-secondary">Annulla</button>
+            </div>
+        </div>
+    `;
+    
+    showFeedback('Anteprima Assegnazione', previewHtml, true);
+    
+    const confirmBtn = document.getElementById('confirmPreviewBtn');
+    const closeBtn = document.getElementById('closePreviewBtn');
+    const dialog = document.getElementById('feedbackDialog');
+    
+    if (confirmBtn) {
+        confirmBtn.addEventListener('click', () => {
+            if (dialog) dialog.close();
+            executeBulkAssign(selectedEmployees, type, mode, hours, reason, year, assignDate);
+        });
+    }
+    
+    if (closeBtn && dialog) {
+        closeBtn.addEventListener('click', () => dialog.close());
+    }
+}
+
+// Esegui assegnazione collettiva
+// Esegui assegnazione collettiva (versione corretta per le modifiche)
+async function executeBulkAssign(selectedEmployees, type, mode, hours, reason, year, assignDate, isEdit = false, originalHistoryId = null) {
+    const loadingToast = showLoadingToast(isEdit ? '⏳ Modifica in corso...' : '⏳ Assegnazione in corso...');
+    
+    let successi = 0;
+    let errori = 0;
+    const dettagli = [];
+    const storicoDettagli = [];
+    
+    // Se siamo in modalità modifica, prima RIPRISTINA l'assegnazione originale
+    if (isEdit && originalHistoryId) {
+        updateLoadingToast(loadingToast, 'Ripristino assegnazione originale...');
+        const originalAssignment = currentHistoryData.find(h => h.id === originalHistoryId);
+        if (originalAssignment && originalAssignment.details) {
+            for (const detail of originalAssignment.details) {
+                try {
+                    const userRef = db.collection('users').doc(detail.employeeId);
+                    const yearOriginal = originalAssignment.year || getAnnoCorrente();
+                    const fieldName = getFieldName(originalAssignment.type === 'ferie' ? 'oreFerie' : 'orePermessi', yearOriginal);
+                    
+                    await userRef.update({
+                        [fieldName]: detail.oldValue,
+                        [`${fieldName}_revertedAt`]: firebase.firestore.FieldValue.serverTimestamp(),
+                        [`${fieldName}_revertedBy`]: appState.currentUser?.uid,
+                        [`${fieldName}_revertedFrom`]: originalHistoryId
+                    });
+                } catch (error) {
+                    console.error('Errore ripristino:', error);
+                }
+            }
+        }
+        
+        // Elimina il vecchio storico
+        await db.collection('bulkAssignHistory').doc(originalHistoryId).delete();
+    }
+    
+    updateLoadingToast(loadingToast, 'Applicazione nuova assegnazione...');
+    
+    // Applica la nuova assegnazione
+    for (const emp of selectedEmployees) {
+        try {
+            const userRef = db.collection('users').doc(emp.id);
+            const userDoc = await userRef.get();
+            const currentData = userDoc.data();
+            
+            const fieldName = getFieldName(type === 'ferie' ? 'oreFerie' : 'orePermessi', year);
+            let currentValue = currentData[fieldName] || (type === 'ferie' ? CONSTANTS.ORE_FERIE_ANNUALI : CONSTANTS.ORE_PERMESSI_ANNUALI);
+            let newValue;
+            
+            switch (mode) {
+                case 'add':
+                    newValue = currentValue + hours;
+                    break;
+                case 'set':
+                    newValue = hours;
+                    break;
+                case 'subtract':
+                    newValue = Math.max(currentValue - hours, 0);
+                    break;
+                default:
+                    newValue = currentValue;
+            }
+            
+            const updateData = {
+                [fieldName]: newValue,
+                [`${fieldName}_lastModified`]: firebase.firestore.FieldValue.serverTimestamp(),
+                [`${fieldName}_modifiedBy`]: appState.currentUser?.uid,
+                [`${fieldName}_reason`]: reason
+            };
+            
+            await userRef.update(updateData);
+            successi++;
+            dettagli.push({
+                id: emp.id,
+                name: emp.name,
+                oldValue: currentValue,
+                newValue: newValue,
+                change: newValue - currentValue
+            });
+            
+            storicoDettagli.push({
+                employeeId: emp.id,
+                employeeName: emp.name,
+                oldValue: currentValue,
+                newValue: newValue,
+                change: newValue - currentValue
+            });
+            
+        } catch (error) {
+            console.error(`Errore per ${emp.name}:`, error);
+            errori++;
+            dettagli.push({
+                name: emp.name,
+                error: error.message
+            });
+        }
+    }
+    
+    // Salva il nuovo log
+    try {
+        await db.collection('bulkAssignHistory').add({
+            type: type,
+            mode: mode,
+            hours: hours,
+            reason: reason,
+            year: year,
+            assignDate: assignDate,
+            employeesCount: selectedEmployees.length,
+            successCount: successi,
+            errorCount: errori,
+            employees: selectedEmployees.map(e => ({ id: e.id, name: e.name })),
+            details: storicoDettagli,
+            executedBy: appState.currentUser?.uid,
+            executedByName: appState.currentUserData?.name,
+            timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+            isEdited: isEdit,
+            originalEditId: isEdit ? originalHistoryId : null
+        });
+    } catch (logError) {
+        console.warn('Impossibile salvare log:', logError);
+    }
+    
+    closeLoadingToast(loadingToast);
+    
+    let message = isEdit ? `✅ MODIFICA COMPLETATA!\n\n` : `✅ ASSEGNAZIONE COMPLETATA!\n\n`;
+    message += `📊 Successi: ${successi}\n`;
+    message += `❌ Errori: ${errori}\n\n`;
+    
+    if (successi > 0) {
+        message += `📋 Riepilogo (primi 5):\n`;
+        dettagli.filter(d => !d.error).slice(0, 5).forEach(d => {
+            const changeSymbol = d.change > 0 ? '+' : '';
+            message += `- ${d.name}: ${d.oldValue}h → ${d.newValue}h (${changeSymbol}${d.change}h)\n`;
+        });
+        if (dettagli.filter(d => !d.error).length > 5) {
+            message += `... e altri ${dettagli.filter(d => !d.error).length - 5} dipendenti\n`;
+        }
+    }
+    
+    showFeedback(isEdit ? 'Modifica Completata' : 'Assegnazione Completata', message, true);
+    
+    // Esci dalla modalità modifica
+    cancelEditMode();
+    
+    // Ricarica i dati
+    await loadEmployeesChecklist();
+    await refreshEmployeesList();
+    await loadBulkHistory();
+}
+
+// Carica storico con azioni
+// Carica storico con filtri e paginazione
+async function loadBulkHistory() {
+    const historyBody = document.getElementById('bulkHistoryBody');
+    if (!historyBody) return;
+    
+    try {
+        historyBody.innerHTML = '<td><td colspan="7" class="text-center"><div class="loading-spinner"></div> Caricamento...</td></tr>';
+        
+        const snapshot = await db.collection('bulkAssignHistory')
+            .orderBy('timestamp', 'desc')
+            .get();
+        
+        currentHistoryData = [];
+        snapshot.forEach(doc => {
+            currentHistoryData.push({
+                id: doc.id,
+                ...doc.data()
+            });
+        });
+        
+        // Aggiorna contatore totale
+        const totalCountSpan = document.getElementById('historyTotalCount');
+        if (totalCountSpan) {
+            totalCountSpan.textContent = `Totale: ${currentHistoryData.length}`;
+        }
+        
+        // Applica filtri
+        applyHistoryFilters();
+        
+    } catch (error) {
+        console.error('Errore caricamento storico:', error);
+        historyBody.innerHTML = `<td><td colspan="7" class="error">Errore: ${error.message}</td></tr>`;
+    }
+}
+
+// Applica filtri allo storico
+function applyHistoryFilters() {
+    const yearFilter = document.getElementById('historyFilterYear')?.value || '';
+    const monthFilter = document.getElementById('historyFilterMonth')?.value || '';
+    const typeFilter = document.getElementById('historyFilterType')?.value || '';
+    
+    // Salva filtri nello stato
+    historyState.filters = {
+        year: yearFilter,
+        month: monthFilter,
+        type: typeFilter
+    };
+    
+    // Filtra i dati
+    let filtered = [...currentHistoryData];
+    
+    if (yearFilter) {
+        filtered = filtered.filter(item => {
+            const itemYear = item.assignDate ? parseInt(item.assignDate.split('-')[0]) : null;
+            return itemYear === parseInt(yearFilter);
+        });
+    }
+    
+    if (monthFilter) {
+        filtered = filtered.filter(item => {
+            const itemMonth = item.assignDate ? parseInt(item.assignDate.split('-')[1]) : null;
+            return itemMonth === parseInt(monthFilter);
+        });
+    }
+    
+    if (typeFilter) {
+        filtered = filtered.filter(item => item.type === typeFilter);
+    }
+    
+    // Aggiorna contatore filtrati
+    const filteredCountSpan = document.getElementById('historyFilteredCount');
+    if (filteredCountSpan) {
+        filteredCountSpan.textContent = `Filtrati: ${filtered.length}`;
+    }
+    
+    // Aggiorna stato
+    historyState.filteredItems = filtered;
+    historyState.totalItems = filtered.length;
+    historyState.currentPage = 1;
+    
+    // Aggiorna paginazione e rendering
+    updateHistoryPagination();
+    renderHistoryPage();
+}
+
+// Renderizza la pagina corrente dello storico
+function renderHistoryPage() {
+    const historyBody = document.getElementById('bulkHistoryBody');
+    if (!historyBody) return;
+    
+    const start = (historyState.currentPage - 1) * historyState.pageSize;
+    const end = start + historyState.pageSize;
+    const pageItems = historyState.filteredItems.slice(start, end);
+    
+    if (pageItems.length === 0) {
+        historyBody.innerHTML = '<tr><td colspan="7" class="text-center">Nessuna assegnazione trovata</td></tr>';
+        return;
+    }
+    
+    historyBody.innerHTML = '';
+    
+    pageItems.forEach(item => {
+        const date = item.assignDate || item.timestamp?.toDate().toLocaleDateString('it-IT') || 'N/D';
+        const timestamp = item.timestamp?.toDate().toLocaleString('it-IT') || 'N/D';
+        const tipoIcon = item.type === 'ferie' ? '🏖️' : '⏰';
+        const modeIcon = item.mode === 'add' ? '➕' : (item.mode === 'set' ? '📝' : '➖');
+        
+        const row = document.createElement('tr');
+        row.innerHTML = `
+            <td data-label="Data Assegnazione">${date}<br><small style="color: var(--text-muted);">${timestamp}</small></td>
+            <td data-label="Tipo">${tipoIcon} ${item.type === 'ferie' ? 'Ferie' : 'Permessi'} (${modeIcon})</td>
+            <td data-label="Ore">${item.hours}h</td>
+            <td data-label="Motivazione">${escapeHtml(item.reason || '-')}</td>
+            <td data-label="Dipendenti">${item.employeesCount} dipendenti</td>
+            <td data-label="Eseguito da">${escapeHtml(item.executedByName || item.executedBy || 'Sistema')}</td>
+            <td data-label="Azioni" class="history-actions-cell">
+                <button class="btn-edit-history" data-id="${item.id}" title="Modifica">✏️</button>
+                <button class="btn-delete-history" data-id="${item.id}" title="Elimina">🗑️</button>
+                <button class="btn-export-single" data-id="${item.id}" title="Esporta PDF">📄</button>
+            </td>
+        `;
+        historyBody.appendChild(row);
+    });
+    
+    // Attacca event listener ai bottoni
+    attachHistoryEventListeners();
+    
+    // Aggiorna data-label per responsive
+    updateHistoryTableDataLabels();
+}
+
+// Attacca event listener per i bottoni dello storico
+function attachHistoryEventListeners() {
+    document.querySelectorAll('.btn-edit-history').forEach(btn => {
+        btn.removeEventListener('click', handleEditClick);
+        btn.addEventListener('click', handleEditClick);
+    });
+    
+    document.querySelectorAll('.btn-delete-history').forEach(btn => {
+        btn.removeEventListener('click', handleDeleteClick);
+        btn.addEventListener('click', handleDeleteClick);
+    });
+    
+    document.querySelectorAll('.btn-export-single').forEach(btn => {
+        btn.removeEventListener('click', handleExportClick);
+        btn.addEventListener('click', handleExportClick);
+    });
+}
+
+function handleEditClick(e) {
+    editBulkAssignment(e.currentTarget.dataset.id);
+}
+
+function handleDeleteClick(e) {
+    deleteBulkAssignment(e.currentTarget.dataset.id);
+}
+
+function handleExportClick(e) {
+    exportSingleAssignmentToPDF(e.currentTarget.dataset.id);
+}
+
+// Aggiorna data-label per responsive
+function updateHistoryTableDataLabels() {
+    const headers = document.querySelectorAll('#bulkAssignSection .requests-table th');
+    const headerTexts = Array.from(headers).map(th => th.textContent.trim());
+    
+    document.querySelectorAll('#bulkAssignSection .requests-table tbody tr').forEach(row => {
+        const cells = row.querySelectorAll('td');
+        cells.forEach((cell, index) => {
+            if (headerTexts[index]) {
+                cell.setAttribute('data-label', headerTexts[index]);
+            }
+        });
+    });
+}
+
+// Aggiorna controlli paginazione
+function updateHistoryPagination() {
+    const totalPages = Math.ceil(historyState.totalItems / historyState.pageSize);
+    const pageInfo = document.getElementById('historyPageInfo');
+    const prevPage = document.getElementById('prevHistoryPage');
+    const nextPage = document.getElementById('nextHistoryPage');
+    const pagination = document.getElementById('historyPagination');
+    
+    if (pageInfo) {
+        pageInfo.textContent = `Pagina ${historyState.currentPage} di ${totalPages || 1}`;
+    }
+    
+    if (prevPage) {
+        prevPage.disabled = historyState.currentPage <= 1;
+    }
+    
+    if (nextPage) {
+        nextPage.disabled = historyState.currentPage >= totalPages;
+    }
+    
+    if (pagination) {
+        pagination.style.display = totalPages > 1 ? 'flex' : 'none';
+    }
+}
+
+// Vai alla pagina precedente
+function goToPrevHistoryPage() {
+    if (historyState.currentPage > 1) {
+        historyState.currentPage--;
+        renderHistoryPage();
+        updateHistoryPagination();
+    }
+}
+
+// Vai alla pagina successiva
+function goToNextHistoryPage() {
+    const totalPages = Math.ceil(historyState.totalItems / historyState.pageSize);
+    if (historyState.currentPage < totalPages) {
+        historyState.currentPage++;
+        renderHistoryPage();
+        updateHistoryPagination();
+    }
+}
+
+// Reset filtri storico
+function resetHistoryFilters() {
+    const yearFilter = document.getElementById('historyFilterYear');
+    const monthFilter = document.getElementById('historyFilterMonth');
+    const typeFilter = document.getElementById('historyFilterType');
+    
+    if (yearFilter) yearFilter.value = '';
+    if (monthFilter) monthFilter.value = '';
+    if (typeFilter) typeFilter.value = '';
+    
+    applyHistoryFilters();
+    showToast('Filtri resettati', 'info');
+}
+
+// Modifica assegnazione
+// Variabile per tracciare se siamo in modalità modifica
+let isEditingMode = false;
+let currentEditingId = null;
+
+// Modifica assegnazione (versione corretta)
+async function editBulkAssignment(historyId) {
+    const assignment = currentHistoryData.find(h => h.id === historyId);
+    if (!assignment) {
+        showFeedback('Errore', 'Assegnazione non trovata');
+        return;
+    }
+    
+    // Salva l'ID dell'assegnazione da modificare
+    currentEditingId = historyId;
+    isEditingMode = true;
+    
+    // Precompila il form con i dati dell'assegnazione
+    document.getElementById('bulkType').value = assignment.type;
+    document.getElementById('bulkMode').value = assignment.mode;
+    document.getElementById('bulkHours').value = assignment.hours;
+    document.getElementById('bulkReason').value = assignment.reason || '';
+    document.getElementById('bulkYear').value = assignment.year || getAnnoCorrente();
+    document.getElementById('bulkDate').value = assignment.assignDate || new Date().toISOString().split('T')[0];
+    // Mostra il bottone annulla
+    const cancelEditBtn = document.getElementById('cancelEditModeBtn');
+    if (cancelEditBtn) cancelEditBtn.style.display = 'inline-block';
+    
+    // Seleziona automaticamente i dipendenti che erano stati selezionati
+    if (assignment.employees && assignment.employees.length > 0) {
+        // Deseleziona tutti prima
+        document.querySelectorAll('.employee-checkbox').forEach(cb => {
+            cb.checked = false;
+        });
+        
+        // Seleziona quelli nell'assegnazione originale
+        assignment.employees.forEach(emp => {
+            const cb = document.querySelector(`.employee-checkbox[value="${emp.id}"]`);
+            if (cb) cb.checked = true;
+        });
+        updateSelectedCount();
+    }
+    
+    // Scrolla al form
+    document.getElementById('bulkAssignSection').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    
+    // Cambia il testo del bottone di esecuzione
+    const executeBtn = document.getElementById('executeBulkAssign');
+    const previewBtn = document.getElementById('previewBulkAssign');
+    
+    // Salva i testi originali
+    executeBtn.setAttribute('data-original-text', executeBtn.textContent);
+    previewBtn.setAttribute('data-original-text', previewBtn.textContent);
+    
+    // Cambia i bottoni
+    executeBtn.textContent = '✏️ Salva Modifiche';
+    executeBtn.classList.add('btn-warning');
+    executeBtn.classList.remove('btn-primary');
+    
+    previewBtn.disabled = true;
+    previewBtn.style.opacity = '0.5';
+    
+    showFeedback('Modalità Modifica', 
+        `📝 Stai modificando l'assegnazione del ${assignment.assignDate}\n\n` +
+        `⚠️ Quando salverai, l'assegnazione originale verrà ELIMINATA e sostituita con la nuova.\n` +
+        `Le ore dei dipendenti verranno RIPRISTINATE ai valori originali e poi RIAPPLICATE con i nuovi dati.`,
+        true);
+}
+
+// Annulla modalità modifica
+function cancelEditMode() {
+    isEditingMode = false;
+    currentEditingId = null;
+    
+    const executeBtn = document.getElementById('executeBulkAssign');
+    const previewBtn = document.getElementById('previewBulkAssign');
+    const cancelEditBtn = document.getElementById('cancelEditModeBtn');
+    
+    if (executeBtn) {
+        const originalText = executeBtn.getAttribute('data-original-text');
+        if (originalText) executeBtn.textContent = originalText;
+        executeBtn.classList.remove('btn-warning');
+        executeBtn.classList.add('btn-primary');
+    }
+    
+    if (previewBtn) {
+        previewBtn.disabled = false;
+        previewBtn.style.opacity = '1';
+    }
+    
+    if (cancelEditBtn) {
+        cancelEditBtn.style.display = 'none';
+    }
+}
+
+// Elimina assegnazione con ripristino ore
+async function deleteBulkAssignment(historyId) {
+    const assignment = currentHistoryData.find(h => h.id === historyId);
+    if (!assignment) {
+        showFeedback('Errore', 'Assegnazione non trovata');
+        return;
+    }
+    
+    const conferma = confirm(
+        `⚠️ ELIMINAZIONE ASSEGNAZIONE CON RIPRISTINO ORE\n\n` +
+        `📅 Data: ${assignment.assignDate}\n` +
+        `📝 Tipo: ${assignment.type === 'ferie' ? 'Ferie' : 'Permessi'}\n` +
+        `⚙️ Operazione: ${assignment.mode === 'add' ? 'Aggiunta' : (assignment.mode === 'set' ? 'Imposta a' : 'Sottrazione')} ${assignment.hours}h\n` +
+        `👥 Dipendenti: ${assignment.employeesCount}\n` +
+        `💬 Motivazione: ${assignment.reason || '-'}\n\n` +
+        `⚠️ Verranno RIPRISTINATE le ore originali di TUTTI i dipendenti coinvolti.\n\n` +
+        `Procedere con l'eliminazione?`
+    );
+    
+    if (!conferma) return;
+    
+    await revertBulkAssignment(historyId);
+    
+    // Elimina il documento storico
+    await db.collection('bulkAssignHistory').doc(historyId).delete();
+    
+    showFeedback('Successo', '✅ Assegnazione eliminata e ore ripristinate con successo!');
+    await loadBulkHistory();
+    await refreshEmployeesList();
+}
+
+// Ripristina un'assegnazione (riporta i valori originali)
+async function revertBulkAssignment(historyId) {
+    const assignment = currentHistoryData.find(h => h.id === historyId);
+    if (!assignment || !assignment.details) {
+        console.error('Dettagli assegnazione non trovati');
+        return;
+    }
+    
+    const loadingToast = showLoadingToast('⏳ Ripristino ore in corso...');
+    let successi = 0;
+    let errori = 0;
+    
+    for (const detail of assignment.details) {
+        try {
+            const userRef = db.collection('users').doc(detail.employeeId);
+            const year = assignment.year || getAnnoCorrente();
+            const fieldName = getFieldName(assignment.type === 'ferie' ? 'oreFerie' : 'orePermessi', year);
+            
+            // Ripristina il valore originale
+            await userRef.update({
+                [fieldName]: detail.oldValue,
+                [`${fieldName}_revertedAt`]: firebase.firestore.FieldValue.serverTimestamp(),
+                [`${fieldName}_revertedBy`]: appState.currentUser?.uid,
+                [`${fieldName}_revertedFrom`]: historyId
+            });
+            successi++;
+        } catch (error) {
+            console.error(`Errore ripristino per ${detail.employeeName}:`, error);
+            errori++;
+        }
+    }
+    
+    closeLoadingToast(loadingToast);
+    showToast(`✅ Ripristinati ${successi} dipendenti (${errori} errori)`, successi > 0 ? 'success' : 'error');
+}
+
+// Esporta storico in PDF
+// Esporta storico in PDF con dettagli completi
+async function exportBulkHistoryToPDF() {
+    const dataToExport = historyState.filteredItems;
+    
+    if (dataToExport.length === 0) {
+        showFeedback('Info', 'Nessuna assegnazione da esportare con i filtri correnti');
+        return;
+    }
+    
+    showToast('Generazione PDF in corso...', 'info');
+    
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ orientation: 'portrait' });
+    
+    // ========== INTESTAZIONE ==========
+    doc.setFontSize(20);
+    doc.setTextColor(79, 70, 229);
+    doc.text('Storico Assegnazioni Collettive', 14, 20);
+    
+    doc.setFontSize(10);
+    doc.setTextColor(100, 100, 100);
+    const dateStr = new Date().toLocaleString('it-IT', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+    });
+    doc.text(`Data esportazione: ${dateStr}`, 14, 30);
+    doc.text(`Totale assegnazioni: ${currentHistoryData.length}`, 14, 37);
+    doc.text(`Azienda: Union14`, 14, 44);
+    
+    // Linea separatrice
+    doc.setDrawColor(200, 200, 200);
+    doc.line(14, 50, 200, 50);
+    
+    let currentY = 60;
+    
+    // ========== PER OGNI ASSEGNAZIONE ==========
+    for (let idx = 0; idx < currentHistoryData.length; idx++) {
+        const item = currentHistoryData[idx];
+        
+        // Controlla se serve nuova pagina
+        if (currentY > 250) {
+            doc.addPage();
+            currentY = 20;
+        }
+        
+        // Card dell'assegnazione
+        const tipoIcon = item.type === 'ferie' ? '🏖️' : '⏰';
+        const modeIcon = item.mode === 'add' ? '➕' : (item.mode === 'set' ? '📝' : '➖');
+        const modeText = item.mode === 'add' ? 'Aggiunta' : (item.mode === 'set' ? 'Imposta a' : 'Sottrazione');
+        
+        // Sfondo della card
+        doc.setFillColor(245, 247, 250);
+        doc.roundedRect(12, currentY - 5, 185, 15, 3, 3, 'F');
+        
+        // Titolo assegnazione
+        doc.setFontSize(12);
+        doc.setTextColor(79, 70, 229);
+        doc.setFont('helvetica', 'bold');
+        doc.text(`#${idx + 1} - ${tipoIcon} ${item.type === 'ferie' ? 'Ferie' : 'Permessi'} (${modeIcon} ${modeText})`, 14, currentY);
+        
+        currentY += 10;
+        
+        // Dettagli principali
+        doc.setFontSize(9);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(60, 60, 60);
+        
+        const assignDate = item.assignDate || 'N/D';
+        const execDate = item.timestamp?.toDate().toLocaleString('it-IT') || 'N/D';
+        const reason = item.reason || 'Nessuna motivazione';
+        const hours = `${item.hours} ore`;
+        const year = item.year || getAnnoCorrente();
+        const executedBy = item.executedByName || item.executedBy || 'Sistema';
+        
+        doc.text(`📅 Data assegnazione: ${assignDate}`, 16, currentY);
+        doc.text(`⏰ Data esecuzione: ${execDate}`, 16, currentY + 6);
+        doc.text(`📊 Ore: ${hours} (Anno: ${year})`, 110, currentY);
+        doc.text(`💬 Motivazione: ${reason}`, 16, currentY + 12);
+        doc.text(`👤 Eseguito da: ${executedBy}`, 110, currentY + 6);
+        
+        currentY += 22;
+        
+        // ========== ELENCO DIPENDENTI (INTELLIGENTE) ==========
+        const dipendentiCount = item.employeesCount || 0;
+        const totalDipendenti = currentEmployeesList.length;
+        
+        // Determina se è "tutti i dipendenti"
+        const isAllEmployees = dipendentiCount === totalDipendenti && totalDipendenti > 0;
+        
+        doc.setFontSize(9);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(79, 70, 229);
+        doc.text(`👥 Dipendenti coinvolti: ${dipendentiCount}`, 16, currentY);
+        
+        currentY += 6;
+        
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(80, 80, 80);
+        
+        if (isAllEmployees) {
+            // Caso: applicato a TUTTI i dipendenti
+            doc.text(`✅ APPLICATO A TUTTI I DIPENDENTI (${totalDipendenti} totali)`, 16, currentY);
+            currentY += 6;
+            doc.text(`   Nessun dettaglio individuale necessario - l'operazione ha`, 16, currentY);
+            currentY += 5;
+            doc.text(`   interessato l'intera azienda.`, 16, currentY);
+            currentY += 8;
+        } else if (dipendentiCount <= 30) {
+            // Caso: pochi dipendenti, mostra tutti
+            doc.setFont('helvetica', 'bold');
+            doc.text(`Elenco dettagliato:`, 16, currentY);
+            currentY += 5;
+            doc.setFont('helvetica', 'normal');
+            
+            if (item.details && item.details.length > 0) {
+                // Mostra dipendenti con dettaglio delle ore
+                for (const detail of item.details.slice(0, 20)) { // Max 20 per pagina
+                    if (currentY > 260) {
+                        doc.addPage();
+                        currentY = 20;
+                    }
+                    const changeSymbol = detail.change > 0 ? '+' : '';
+                    doc.text(`   • ${detail.employeeName.substring(0, 25)}: ${detail.oldValue}h → ${detail.newValue}h (${changeSymbol}${detail.change}h)`, 16, currentY);
+                    currentY += 5;
+                }
+                
+                if (item.details.length > 20) {
+                    doc.text(`   ... e altri ${item.details.length - 20} dipendenti`, 16, currentY);
+                    currentY += 5;
+                }
+            } else if (item.employees && item.employees.length > 0) {
+                // Fallback: mostra solo i nomi
+                for (const emp of item.employees.slice(0, 25)) {
+                    if (currentY > 260) {
+                        doc.addPage();
+                        currentY = 20;
+                    }
+                    doc.text(`   • ${emp.name.substring(0, 30)}`, 16, currentY);
+                    currentY += 5;
+                }
+                if (item.employees.length > 25) {
+                    doc.text(`   ... e altri ${item.employees.length - 25} dipendenti`, 16, currentY);
+                    currentY += 5;
+                }
+            }
+            currentY += 3;
+        } else {
+            // Caso: molti dipendenti, mostra solo statistiche
+            doc.text(`📊 Riepilogo statistiche (${dipendentiCount} dipendenti):`, 16, currentY);
+            currentY += 6;
+            
+            if (item.details && item.details.length > 0) {
+                // Calcola statistiche aggregate
+                let totaleAdd = 0;
+                let totaleSub = 0;
+                let maxAdd = 0;
+                let maxSub = 0;
+                let minValue = Infinity;
+                let maxValue = -Infinity;
+                
+                for (const detail of item.details) {
+                    if (detail.change > 0) {
+                        totaleAdd += detail.change;
+                        maxAdd = Math.max(maxAdd, detail.change);
+                    } else if (detail.change < 0) {
+                        totaleSub += Math.abs(detail.change);
+                        maxSub = Math.max(maxSub, Math.abs(detail.change));
+                    }
+                    minValue = Math.min(minValue, detail.newValue);
+                    maxValue = Math.max(maxValue, detail.newValue);
+                }
+                
+                doc.text(`   • Totale ore aggiunte: +${totaleAdd}h`, 16, currentY);
+                currentY += 5;
+                doc.text(`   • Totale ore sottratte: -${totaleSub}h`, 16, currentY);
+                currentY += 5;
+                doc.text(`   • Massimo incremento singolo: +${maxAdd}h`, 16, currentY);
+                currentY += 5;
+                doc.text(`   • Massimo decremento singolo: -${maxSub}h`, 16, currentY);
+                currentY += 5;
+                doc.text(`   • Range ore finali: ${minValue}h - ${maxValue}h`, 16, currentY);
+                currentY += 8;
+            }
+            
+            doc.text(`   📋 Per l'elenco completo dei ${dipendentiCount} dipendenti,`, 16, currentY);
+            currentY += 5;
+            doc.text(`      consultare il database o il report dettagliato.`, 16, currentY);
+            currentY += 8;
+        }
+        
+        // ========== RIEPILOGO OPERAZIONE ==========
+        if (item.successCount !== undefined) {
+            doc.setFillColor(240, 248, 255);
+            doc.roundedRect(14, currentY - 3, 182, 18, 3, 3, 'F');
+            
+            doc.setFont('helvetica', 'bold');
+            doc.setTextColor(0, 100, 0);
+            doc.text(`✅ Successi: ${item.successCount}`, 18, currentY + 3);
+            
+            if (item.errorCount > 0) {
+                doc.setTextColor(200, 0, 0);
+                doc.text(`❌ Errori: ${item.errorCount}`, 110, currentY + 3);
+            } else {
+                doc.setTextColor(100, 100, 100);
+                doc.text(`❌ Errori: 0`, 110, currentY + 3);
+            }
+            
+            currentY += 18;
+        }
+        
+        // Linea separatrice tra assegnazioni
+        doc.setDrawColor(220, 220, 220);
+        doc.setLineWidth(0.5);
+        doc.line(14, currentY, 200, currentY);
+        currentY += 10;
+    }
+    
+    // ========== PAGINA RIEPILOGO FINALE ==========
+    doc.addPage();
+    currentY = 20;
+    
+    doc.setFontSize(16);
+    doc.setTextColor(79, 70, 229);
+    doc.setFont('helvetica', 'bold');
+    doc.text('📊 Riepilogo Generale', 14, currentY);
+    currentY += 12;
+    
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(60, 60, 60);
+    
+    // Statistiche aggregate
+    let totaleOperazioni = currentHistoryData.length;
+    let totaleFerie = 0;
+    let totalePermessi = 0;
+    let totaleDipendentiCoinvolti = 0;
+    let totaleOreAssegnate = 0;
+    
+    for (const item of currentHistoryData) {
+        if (item.type === 'ferie') {
+            totaleFerie++;
+        } else {
+            totalePermessi++;
+        }
+        totaleDipendentiCoinvolti += item.employeesCount || 0;
+        totaleOreAssegnate += (item.hours || 0) * (item.employeesCount || 0);
+    }
+    
+    doc.text(`📋 Totale operazioni: ${totaleOperazioni}`, 16, currentY);
+    currentY += 7;
+    doc.text(`🏖️ Assegnazioni ferie: ${totaleFerie}`, 16, currentY);
+    currentY += 7;
+    doc.text(`⏰ Assegnazioni permessi: ${totalePermessi}`, 16, currentY);
+    currentY += 7;
+    doc.text(`👥 Totale dipendenti coinvolti (somma): ${totaleDipendentiCoinvolti}`, 16, currentY);
+    currentY += 7;
+    doc.text(`⚖️ Totale ore assegnate (complessivo): ${totaleOreAssegnate}h`, 16, currentY);
+    currentY += 15;
+    
+    // Legenda
+    doc.setFont('helvetica', 'bold');
+    doc.text('📖 Legenda:', 16, currentY);
+    currentY += 7;
+    doc.setFont('helvetica', 'normal');
+    doc.text('➕ = Aggiunta ore (bonus, premio)', 18, currentY);
+    currentY += 5;
+    doc.text('📝 = Imposta a (sostituzione valore)', 18, currentY);
+    currentY += 5;
+    doc.text('➖ = Sottrazione ore (festività, chiusura)', 18, currentY);
+    currentY += 10;
+    
+    doc.text('📌 Nota: Il riepilogo "dipendenti coinvolti" è la somma di tutti', 16, currentY);
+    currentY += 5;
+    doc.text('   i dipendenti per ogni operazione. Un dipendente può comparire', 16, currentY);
+    currentY += 5;
+    doc.text('   in più operazioni.', 16, currentY);
+    
+    // Footer
+    const pageCount = doc.internal.getNumberOfPages();
+    for (let i = 1; i <= pageCount; i++) {
+        doc.setPage(i);
+        doc.setFontSize(8);
+        doc.setTextColor(150, 150, 150);
+        doc.text(`Union14 - Gestione Richieste - Pagina ${i} di ${pageCount}`, 14, 285);
+    }
+    
+    // Salva PDF
+    const filename = `storico_assegnazioni_${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.pdf`;
+    doc.save(filename);
+    
+    showToast('PDF generato con successo!', 'success');
+}
+// Esporta una singola assegnazione in PDF
+async function exportSingleAssignmentToPDF(historyId) {
+    const assignment = currentHistoryData.find(h => h.id === historyId);
+    if (!assignment) {
+        showFeedback('Errore', 'Assegnazione non trovata');
+        return;
+    }
+    
+    showToast('Generazione PDF in corso...', 'info');
+    
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ orientation: 'portrait' });
+    
+    // Intestazione
+    doc.setFontSize(18);
+    doc.setTextColor(79, 70, 229);
+    doc.text('Dettaglio Assegnazione Collettiva', 14, 20);
+    
+    doc.setFontSize(9);
+    doc.setTextColor(100, 100, 100);
+    const dateStr = new Date().toLocaleString('it-IT');
+    doc.text(`Data esportazione: ${dateStr}`, 14, 30);
+    doc.text(`ID Assegnazione: ${historyId.substring(0, 8)}...`, 14, 37);
+    
+    doc.line(14, 45, 200, 45);
+    
+    let currentY = 55;
+    
+    // Dettagli principali
+    const tipoIcon = assignment.type === 'ferie' ? '🏖️' : '⏰';
+    const modeText = assignment.mode === 'add' ? 'Aggiunta' : (assignment.mode === 'set' ? 'Imposta a' : 'Sottrazione');
+    
+    doc.setFontSize(12);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(79, 70, 229);
+    doc.text(`${tipoIcon} ${assignment.type === 'ferie' ? 'FERIE' : 'PERMESSI'} - ${modeText}`, 14, currentY);
+    currentY += 10;
+    
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(60, 60, 60);
+    
+    doc.text(`📅 Data assegnazione: ${assignment.assignDate || 'N/D'}`, 16, currentY);
+    currentY += 7;
+    doc.text(`📊 Ore: ${assignment.hours}h`, 16, currentY);
+    currentY += 7;
+    doc.text(`📆 Anno di riferimento: ${assignment.year || getAnnoCorrente()}`, 16, currentY);
+    currentY += 7;
+    doc.text(`💬 Motivazione: ${assignment.reason || 'Nessuna'}`, 16, currentY);
+    currentY += 7;
+    doc.text(`👤 Eseguito da: ${assignment.executedByName || assignment.executedBy || 'Sistema'}`, 16, currentY);
+    currentY += 7;
+    doc.text(`⏰ Data esecuzione: ${assignment.timestamp?.toDate().toLocaleString('it-IT') || 'N/D'}`, 16, currentY);
+    currentY += 12;
+    
+    // Dipendenti
+    const totalDipendenti = currentEmployeesList.length;
+    const isAllEmployees = assignment.employeesCount === totalDipendenti && totalDipendenti > 0;
+    
+    doc.setFont('helvetica', 'bold');
+    doc.text(`👥 Dipendenti coinvolti: ${assignment.employeesCount}`, 16, currentY);
+    currentY += 7;
+    
+    if (isAllEmployees) {
+        doc.setFont('helvetica', 'normal');
+        doc.text(`✅ APPLICATO A TUTTI I DIPENDENTI (${totalDipendenti} totali)`, 16, currentY);
+        currentY += 7;
+    } else if (assignment.details && assignment.details.length > 0) {
+        doc.setFont('helvetica', 'bold');
+        doc.text(`Elenco dettagliato:`, 16, currentY);
+        currentY += 5;
+        doc.setFont('helvetica', 'normal');
+        
+        for (const detail of assignment.details.slice(0, 25)) {
+            if (currentY > 270) {
+                doc.addPage();
+                currentY = 20;
+            }
+            const changeSymbol = detail.change > 0 ? '+' : '';
+            doc.text(`• ${detail.employeeName.substring(0, 25)}: ${detail.oldValue}h → ${detail.newValue}h (${changeSymbol}${detail.change}h)`, 18, currentY);
+            currentY += 5;
+        }
+        
+        if (assignment.details.length > 25) {
+            doc.text(`... e altri ${assignment.details.length - 25} dipendenti`, 18, currentY);
+            currentY += 5;
+        }
+    }
+    
+    // Footer
+    doc.setFontSize(8);
+    doc.setTextColor(150, 150, 150);
+    doc.text('Union14 - Gestione Richieste', 14, 285);
+    
+    const filename = `assegnazione_${assignment.assignDate}_${assignment.type}_${historyId.substring(0, 8)}.pdf`;
+    doc.save(filename);
+    
+    showToast('PDF generato con successo!', 'success');
+}
+
+// Inizializza eventi
+function initBulkAssignEvents() {
+    const selectAllBtn = document.getElementById('selectAllEmployees');
+    const deselectAllBtn = document.getElementById('deselectAllEmployees');
+    const previewBtn = document.getElementById('previewBulkAssign');
+    const executeBtn = document.getElementById('executeBulkAssign');
+    const exportBtn = document.getElementById('exportBulkHistoryPDF');
+    const refreshBtn = document.getElementById('refreshBulkHistory');
+    // Bottone annulla modifica
+const cancelEditBtn = document.getElementById('cancelEditModeBtn');
+if (cancelEditBtn) {
+    cancelEditBtn.addEventListener('click', () => {
+        cancelEditMode();
+        cancelEditBtn.style.display = 'none';
+        showFeedback('Modifica annullata', 'Operazione di modifica annullata');
+    });
+}
+ // Filtri storico
+    const applyFiltersBtn = document.getElementById('applyHistoryFilters');
+    const resetFiltersBtn = document.getElementById('resetHistoryFilters');
+    const prevPageBtn = document.getElementById('prevHistoryPage');
+    const nextPageBtn = document.getElementById('nextHistoryPage');
+    
+    if (applyFiltersBtn) {
+        applyFiltersBtn.addEventListener('click', applyHistoryFilters);
+    }
+    
+    if (resetFiltersBtn) {
+        resetFiltersBtn.addEventListener('click', resetHistoryFilters);
+    }
+    
+    if (prevPageBtn) {
+        prevPageBtn.addEventListener('click', goToPrevHistoryPage);
+    }
+    
+    if (nextPageBtn) {
+        nextPageBtn.addEventListener('click', goToNextHistoryPage);
+    }    
+
+
+    // Imposta data di default a oggi
+    const dateInput = document.getElementById('bulkDate');
+    if (dateInput && !dateInput.value) {
+        dateInput.value = new Date().toISOString().split('T')[0];
+    }
+    
+    if (selectAllBtn) {
+        selectAllBtn.addEventListener('click', () => {
+            document.querySelectorAll('.employee-checkbox').forEach(cb => cb.checked = true);
+            updateSelectedCount();
+        });
+    }
+    
+    if (deselectAllBtn) {
+        deselectAllBtn.addEventListener('click', () => {
+            document.querySelectorAll('.employee-checkbox').forEach(cb => cb.checked = false);
+            updateSelectedCount();
+        });
+    }
+    
+    if (previewBtn) {
+        previewBtn.addEventListener('click', previewBulkAssign);
+    }
+    
+    if (executeBtn) {
+    // Rimuovi eventuali listener vecchi
+    const newExecuteBtn = executeBtn.cloneNode(true);
+    executeBtn.parentNode.replaceChild(newExecuteBtn, executeBtn);
+    
+    newExecuteBtn.addEventListener('click', async () => {
+        const selected = getSelectedEmployees();
+        if (selected.length === 0) {
+            showFeedback('Errore', 'Seleziona almeno un dipendente');
+            return;
+        }
+        
+        const type = document.getElementById('bulkType').value;
+        const mode = document.getElementById('bulkMode').value;
+        const hours = parseInt(document.getElementById('bulkHours').value) || 0;
+        const reason = document.getElementById('bulkReason').value || 'Assegnazione collettiva';
+        const year = parseInt(document.getElementById('bulkYear').value) || getAnnoCorrente();
+        const assignDate = document.getElementById('bulkDate').value || new Date().toISOString().split('T')[0];
+        
+        if (hours <= 0) {
+            showFeedback('Errore', 'Le ore devono essere maggiori di 0');
+            return;
+        }
+        
+        let conferma = false;
+        let actionMessage = '';
+        
+        if (isEditingMode && currentEditingId) {
+            actionMessage = 
+                `⚠️ CONFERMA MODIFICA ASSEGNAZIONE\n\n` +
+                `📝 Stai MODIFICANDO un'assegnazione esistente\n` +
+                `📊 ${selected.length} dipendenti selezionati\n` +
+                `📅 Data: ${assignDate}\n` +
+                `📝 Operazione: ${mode === 'add' ? 'Aggiunta' : (mode === 'set' ? 'Imposta a' : 'Sottrazione')} ${hours}h di ${type === 'ferie' ? 'ferie' : 'permessi'}\n` +
+                `📅 Anno: ${year}\n` +
+                `💬 Motivazione: ${reason}\n\n` +
+                `⚠️ L'assegnazione originale verrà ELIMINATA e SOSTITUITA.\n` +
+                `Le ore verranno RIPRISTINATE e poi RIAPPLICATE.\n\n` +
+                `Procedere con la modifica?`;
+        } else {
+            actionMessage = 
+                `⚠️ CONFERMA ASSEGNAZIONE COLLETTIVA\n\n` +
+                `📊 ${selected.length} dipendenti selezionati\n` +
+                `📅 Data: ${assignDate}\n` +
+                `📝 Operazione: ${mode === 'add' ? 'Aggiunta' : (mode === 'set' ? 'Imposta a' : 'Sottrazione')} ${hours}h di ${type === 'ferie' ? 'ferie' : 'permessi'}\n` +
+                `📅 Anno: ${year}\n` +
+                `💬 Motivazione: ${reason}\n\n` +
+                `Procedere?`;
+        }
+        
+        conferma = confirm(actionMessage);
+        
+        if (conferma) {
+            if (isEditingMode && currentEditingId) {
+                await executeBulkAssign(selected, type, mode, hours, reason, year, assignDate, true, currentEditingId);
+            } else {
+                await executeBulkAssign(selected, type, mode, hours, reason, year, assignDate, false, null);
+            }
+        }
+    });
+}
+    
+    if (exportBtn) {
+        exportBtn.addEventListener('click', exportBulkHistoryToPDF);
+    }
+    
+    if (refreshBtn) {
+        refreshBtn.addEventListener('click', loadBulkHistory);
+    }
+}
+// ==================== REAL-TIME LISTENER PER ORE DIPENDENTE ====================
+
+let oreRealTimeListener = null;
+
+// Imposta un listener in tempo reale per le ore del dipendente corrente
+function setupOreRealTimeListener() {
+    // Rimuovi il listener precedente se esiste
+    if (oreRealTimeListener) {
+        oreRealTimeListener();
+        oreRealTimeListener = null;
+    }
+    
+    if (!appState.currentUser || appState.isAdmin) return;
+    
+    const userRef = db.collection('users').doc(appState.currentUser.uid);
+    
+    oreRealTimeListener = userRef.onSnapshot((doc) => {
+        if (doc.exists && appState.currentUser) {
+            const userData = doc.data();
+            
+            // Aggiorna i dati locali
+            appState.currentUserData = userData;
+            
+            // Aggiorna il display delle ore residue in tempo reale
+            aggiornaDisplayOreResidue();
+            
+            // Mostra una notifica toast se le ore sono cambiate significativamente
+            // (opzionale, per feedback all'utente)
+            if (window.lastOreValues) {
+                const oldFerie = window.lastOreValues.ferie;
+                const oldPermessi = window.lastOreValues.permessi;
+                
+                // Calcola le nuove ore totali
+                const annoCorrente = getAnnoCorrente();
+                const oreFerieAnno = userData[getFieldName('oreFerie', annoCorrente)] || CONSTANTS.ORE_FERIE_ANNUALI;
+                const orePermessiAnno = userData[getFieldName('orePermessi', annoCorrente)] || CONSTANTS.ORE_PERMESSI_ANNUALI;
+                const ferieUtilizzate = userData[getFieldName('oreFerieUtilizzate', annoCorrente)] || 0;
+                const permessiUtilizzate = userData[getFieldName('orePermessiUtilizzate', annoCorrente)] || 0;
+                const feriePrecedenti = userData.oreFeriePrecedenti || 0;
+                const permessiPrecedenti = userData.orePermessiPrecedenti || 0;
+                
+                const nuoveFerie = (oreFerieAnno - ferieUtilizzate) + feriePrecedenti;
+                const nuoviPermessi = (orePermessiAnno - permessiUtilizzate) + permessiPrecedenti;
+                
+                if (nuoveFerie !== oldFerie) {
+                    const diff = nuoveFerie - oldFerie;
+                    const diffText = diff > 0 ? `+${diff}` : `${diff}`;
+                    showToast(`🏖️ Ore ferie aggiornate: ${oldFerie}h → ${nuoveFerie}h (${diffText})`, 'info');
+                }
+                
+                if (nuoviPermessi !== oldPermessi) {
+                    const diff = nuoviPermessi - oldPermessi;
+                    const diffText = diff > 0 ? `+${diff}` : `${diff}`;
+                    showToast(`⏰ Ore permessi aggiornate: ${oldPermessi}h → ${nuoviPermessi}h (${diffText})`, 'info');
+                }
+            }
+            
+            // Salva i valori correnti per il prossimo confronto
+            aggiornaValoriOreMemorizzati();
+        }
+    }, (error) => {
+        console.error('Errore real-time listener ore:', error);
+    });
+}
+
+// Memorizza i valori correnti delle ore per rilevare cambiamenti
+async function aggiornaValoriOreMemorizzati() {
+    if (!appState.currentUser || appState.isAdmin) return;
+    
+    const totali = await getOreTotali(appState.currentUser.uid);
+    window.lastOreValues = {
+        ferie: totali.ferie,
+        permessi: totali.permessi
+    };
 }
 // ==================== INITIALIZATION ====================
 function initializeApp() {

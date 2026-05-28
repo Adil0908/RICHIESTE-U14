@@ -170,27 +170,188 @@
                         <button id="nextEmployeesPage" class="btn btn-pagination" disabled aria-label="Pagina successiva">Successiva</button>
                     </div>
                 </div>
-<!-- Calendario Assenze (solo admin) -->
-<section id="calendarSection" class="calendar-section" style="display: none;" aria-labelledby="calendar-title">
-    <h2 id="calendar-title">📅 Calendario Assenze</h2>
-    <div class="calendar-controls">
-        <button id="prevMonth" class="btn btn-secondary">◀ Mese Precedente</button>
-        <span id="currentMonthYear" class="current-month"></span>
-        <button id="nextMonth" class="btn btn-secondary">Mese Successivo ▶</button>
-        <button id="todayBtn" class="btn btn-primary">Oggi</button>
-    </div>
-    <div id="calendarGrid" class="calendar-grid"></div>
-    <div id="absenceDetails" class="absence-details" style="display: none;">
-        <h3>Dettagli Assenze</h3>
-        <div id="absenceList"></div>
-    </div>
-</section>
+                             <!-- Calendario Assenze (solo admin) -->
+                                  <section id="calendarSection" class="calendar-section" style="display: none;" aria-labelledby="calendar-title">
+                                      <h2 id="calendar-title">📅 Calendario Assenze</h2>
+                                          <div class="calendar-controls">
+                                               <button id="prevMonth" class="btn btn-secondary">◀ Mese Precedente</button>
+                                               <span id="currentMonthYear" class="current-month"></span>
+                                              <button id="nextMonth" class="btn btn-secondary">Mese Successivo ▶</button>
+                                              <button id="todayBtn" class="btn btn-primary">Oggi</button>
+                                              </div>
+                                             <div id="calendarGrid" class="calendar-grid"></div>
+                                             <div id="absenceDetails" class="absence-details" style="display: none;">
+                                              <h3>Dettagli Assenze</h3>
+                                             <div id="absenceList"></div>
+                                            </div>
+                                     </section>
 
 <!-- Notifiche Desktop -->
 <div id="notificationPermission" class="notification-banner" style="display: none;">
     <p>🔔 Abilita le notifiche per ricevere avvisi sulle assenze giornaliere</p>
     <button id="enableNotifications" class="btn btn-primary btn-small">Abilita Notifiche</button>
 </div>
+
+  
+  <!-- Assegnazione Collettiva Permessi/Ferie -->
+<section id="bulkAssignSection" class="bulk-assign-section" aria-labelledby="bulk-title">
+    <h2 id="bulk-title">🎁 Assegnazione Collettiva</h2>
+    <p class="section-description">Assegna ferie o permessi a tutti i dipendenti o a gruppi selezionati (es. festività nazionali/regionali)</p>
+    
+    <div class="bulk-assign-form">
+        <div class="form-row">
+            <div class="form-group">
+                <label class="form-label required">Tipo Assegnazione</label>
+                <select id="bulkType" class="form-control">
+                    <option value="ferie">🏖️ Ferie</option>
+                    <option value="permessi">⏰ Permessi</option>
+                </select>
+            </div>
+            
+            <div class="form-group">
+                <label class="form-label required">Modalità</label>
+                <select id="bulkMode" class="form-control">
+                    <option value="add">➕ Aggiungi ore (es. bonus)</option>
+                    <option value="set">📝 Imposta a (sostituisci)</option>
+                    <option value="subtract">➖ Sottrai ore (es. festività)</option>
+                </select>
+            </div>
+            
+            <div class="form-group">
+                <label class="form-label required">Ore da Assegnare</label>
+                <input type="number" id="bulkHours" class="form-control" step="1" min="0" value="8" required>
+                <small class="form-help">Inserisci le ore (es. 8 = 1 giorno, 16 = 2 giorni)</small>
+            </div>
+        </div>
+        
+        <div class="form-row">
+            <div class="form-group">
+                <label class="form-label required">📅 Data Assegnazione</label>
+                <input type="date" id="bulkDate" class="form-control" required>
+                <small class="form-help">Data in cui viene applicata l'assegnazione</small>
+            </div>
+            
+            <div class="form-group">
+                <label class="form-label">Anno di Riferimento</label>
+                <input type="number" id="bulkYear" class="form-control" value="2026" min="2024" max="2030">
+            </div>
+        </div>
+        
+        <div class="form-group">
+            <label class="form-label">Motivazione/Descrizione</label>
+            <input type="text" id="bulkReason" class="form-control" placeholder="Es. Festività del 25 Aprile, Chiusura aziendale, Bonus ferie...">
+        </div>
+        
+        <div class="form-group">
+            <label class="form-label">Seleziona Dipendenti</label>
+            <div class="employee-selector">
+                <div class="selector-actions">
+                    <button type="button" id="selectAllEmployees" class="btn-small btn-primary">✅ Seleziona Tutti</button>
+                    <button type="button" id="deselectAllEmployees" class="btn-small btn-secondary">❌ Deseleziona Tutti</button>
+                    <span id="selectedCount" class="selected-count">0 selezionati</span>
+                </div>
+                <div id="employeesChecklist" class="employees-checklist">
+                    <div class="loading-spinner"></div> Caricamento dipendenti...
+                </div>
+            </div>
+        </div>
+        
+        <div class="bulk-actions">
+            <button id="previewBulkAssign" class="btn btn-info">👁️ Anteprima</button>
+            <button id="executeBulkAssign" class="btn btn-warning">⚠️ Assegna a Dipendenti Selezionati</button>
+              <button id="cancelEditModeBtn" class="btn btn-secondary" style="display: none;">❌ Annulla Modifica</button>
+        </div>
+    </div>
+    
+    <!-- Storico Assegnazioni con azioni -->
+    <div class="bulk-history">
+           <h3>📋 Storico Assegnazioni Collettive</h3>
+    
+    <!-- Filtri per storico -->
+    <div class="history-filters">
+        <div class="filter-group">
+            <label>📅 Anno</label>
+            <select id="historyFilterYear" class="form-control">
+                <option value="">Tutti</option>
+                <option value="2024">2024</option>
+                <option value="2025">2025</option>
+                <option value="2026">2026</option>
+                <option value="2027">2027</option>
+                <option value="2028">2028</option>
+            </select>
+        </div>
+        <div class="filter-group">
+            <label>📆 Mese</label>
+            <select id="historyFilterMonth" class="form-control">
+                <option value="">Tutti</option>
+                <option value="1">Gennaio</option>
+                <option value="2">Febbraio</option>
+                <option value="3">Marzo</option>
+                <option value="4">Aprile</option>
+                <option value="5">Maggio</option>
+                <option value="6">Giugno</option>
+                <option value="7">Luglio</option>
+                <option value="8">Agosto</option>
+                <option value="9">Settembre</option>
+                <option value="10">Ottobre</option>
+                <option value="11">Novembre</option>
+                <option value="12">Dicembre</option>
+            </select>
+        </div>
+        <div class="filter-group">
+            <label>🔍 Tipo</label>
+            <select id="historyFilterType" class="form-control">
+                <option value="">Tutti</option>
+                <option value="ferie">Ferie</option>
+                <option value="permessi">Permessi</option>
+            </select>
+        </div>
+        <div class="filter-actions">
+            <button id="applyHistoryFilters" class="btn btn-primary btn-small">Applica Filtri</button>
+            <button id="resetHistoryFilters" class="btn btn-secondary btn-small">Reset</button>
+        </div>
+    </div>
+    
+    <div class="history-toolbar">
+        <div class="history-info">
+            <span id="historyTotalCount" class="badge-info">Totale: 0</span>
+            <span id="historyFilteredCount" class="badge-info">Filtrati: 0</span>
+        </div>
+        <div class="history-actions">
+            <button id="exportBulkHistoryPDF" class="btn btn-info btn-small">📄 Esporta PDF</button>
+            <button id="refreshBulkHistory" class="btn btn-secondary btn-small">🔄 Aggiorna</button>
+        </div>
+    </div>
+    
+    <div class="table-container">
+        <table class="requests-table">
+            <thead>
+                <tr>
+                    <th>Data Assegnazione</th>
+                    <th>Tipo</th>
+                    <th>Ore</th>
+                    <th>Motivazione</th>
+                    <th>Dipendenti</th>
+                    <th>Eseguito da</th>
+                    <th>Azioni</th>
+                </tr>
+            </thead>
+            <tbody id="bulkHistoryBody">
+                <tr><td colspan="7" class="text-center">Caricamento...</td></tr>
+            </tbody>
+        </table>
+    </div>
+    
+    <!-- Paginazione -->
+    <div class="pagination" id="historyPagination" style="display: none;">
+        <button id="prevHistoryPage" class="btn btn-pagination" disabled>← Precedente</button>
+        <span id="historyPageInfo" class="page-info">Pagina 1 di 1</span>
+        <button id="nextHistoryPage" class="btn btn-pagination" disabled>Successiva →</button>
+    </div>
+</div>
+</section>
+
+
                 <div id="adminFilters" class="filters-section" aria-labelledby="filters-title">
                     <h3 id="filters-title">Filtri Ricerca</h3>
                     <div class="filter-grid">
@@ -229,6 +390,8 @@
                                 <option value="12">Dicembre</option>
                             </select>
                         </div>
+
+
                         <div class="filter-group">
                             <label for="filterStatus">Stato</label>
                             <select id="filterStatus" class="form-control" aria-label="Filtra per stato">
@@ -248,6 +411,7 @@
                     </div>
                 </div>
             </div>
+          
         </section>
 
         <!-- Requests Section -->
